@@ -1,0 +1,37 @@
+# Two containers sharing one SQLite file: the poller writes, the dashboard reads.
+# SQLite runs in WAL mode (see tg/db.py), which makes that safe.
+#
+#   cp config.example.yaml config.yaml && cp .env.example .env   # then edit both
+#   docker compose up -d
+#   docker compose logs -f poller
+
+services:
+  poller:
+    build:
+      context: .
+      args:
+        WITH_BROWSER: "0"     # set to "1" only if you enable seatmap or assist:drive
+    image: ticket-grabber:latest
+    restart: unless-stopped
+    env_file: [.env]
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - tg-data:/app/data
+    command: ["tg", "run"]
+    healthcheck:
+      disable: true           # the poller serves no HTTP; the web service is probed
+
+  web:
+    image: ticket-grabber:latest
+    depends_on: [poller]
+    restart: unless-stopped
+    env_file: [.env]
+    ports:
+      - "127.0.0.1:8756:8756"   # loopback only; put it behind your own reverse proxy
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - tg-data:/app/data
+    command: ["tg", "serve", "--host", "0.0.0.0", "--port", "8756"]
+
+volumes:
+  tg-data:

@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="60">
+  <title>ticket-grabber</title>
+  <style>
+    :root {
+      --bg: #0f1115; --panel: #171a21; --line: #262b36;
+      --fg: #e6e8ee; --dim: #9aa3b2; --accent: #4da3ff;
+      --ok: #3ecf8e; --warn: #f0a03c; --bad: #ef5f5f;
+    }
+    @media (prefers-color-scheme: light) {
+      :root { --bg:#f6f7f9; --panel:#fff; --line:#e3e6ec; --fg:#1a1d23; --dim:#5d6675; }
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; padding:1.5rem; background:var(--bg); color:var(--fg);
+           font:15px/1.5 ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif; }
+    h1 { font-size:1.15rem; margin:0; letter-spacing:-.01em; }
+    h2 { font-size:.8rem; text-transform:uppercase; letter-spacing:.08em;
+         color:var(--dim); margin:0 0 .6rem; font-weight:600; }
+    header { display:flex; align-items:center; gap:1rem; flex-wrap:wrap; margin-bottom:1.25rem; }
+    .pill { padding:.2rem .6rem; border-radius:999px; font-size:.78rem; font-weight:600; }
+    .hot { background:rgba(239,95,95,.15); color:var(--bad); }
+    .cool { background:rgba(62,207,142,.15); color:var(--ok); }
+    .grid { display:grid; gap:1rem; grid-template-columns:repeat(auto-fit,minmax(330px,1fr)); }
+    section { background:var(--panel); border:1px solid var(--line);
+              border-radius:10px; padding:1rem; }
+    .wide { grid-column:1/-1; }
+    .scroll { overflow-x:auto; }
+    table { width:100%; border-collapse:collapse; font-size:.86rem; }
+    th { text-align:left; color:var(--dim); font-weight:600; padding:.3rem .5rem;
+         border-bottom:1px solid var(--line); white-space:nowrap; }
+    td { padding:.35rem .5rem; border-bottom:1px solid var(--line); }
+    tr:last-child td { border-bottom:0; }
+    a { color:var(--accent); text-decoration:none; }
+    a:hover { text-decoration:underline; }
+    .num { font-variant-numeric:tabular-nums; }
+    .dim { color:var(--dim); }
+    .ok { color:var(--ok); } .warn { color:var(--warn); } .bad { color:var(--bad); }
+    .empty { color:var(--dim); font-style:italic; padding:.5rem; }
+    .bar { display:inline-block; width:60px; height:6px; background:var(--line);
+           border-radius:3px; overflow:hidden; vertical-align:middle; margin-right:.4rem; }
+    .bar > i { display:block; height:100%; background:var(--ok); }
+    .stat { display:flex; gap:1.25rem; flex-wrap:wrap; }
+    .stat div { font-size:.8rem; color:var(--dim); }
+    .stat b { display:block; font-size:1.3rem; color:var(--fg); font-variant-numeric:tabular-nums; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ticket-grabber</h1>
+    <span class="pill {{ 'hot' if hot else 'cool' }}">
+      {{ 'HOT' if hot else 'baseline' }} · every {{ interval }}s
+    </span>
+    <span class="dim" style="margin-left:auto">auto-refresh 60s</span>
+  </header>
+
+  <div class="grid">
+    <section>
+      <h2>Overview</h2>
+      <div class="stat">
+        <div><b>{{ counts.screenings }}</b>screenings</div>
+        <div><b>{{ counts.events }}</b>titles</div>
+        <div><b>{{ matches|length }}</b>watched</div>
+        <div><b>{{ alerts_24h }}</b>alerts / 24h</div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Sources</h2>
+      {% if health %}
+      <div class="scroll"><table>
+        <tr><th>source</th><th>last poll</th><th>errors</th><th>empty</th></tr>
+        {% for h in health %}
+        <tr>
+          <td>{{ h.source }}</td>
+          <td class="dim">{{ h.last_poll }}</td>
+          <td class="num {{ 'bad' if h.errors else 'ok' }}">{{ h.errors }}</td>
+          <td class="num {{ 'warn' if h.empty else '' }}">{{ h.empty }}</td>
+        </tr>
+        {% if h.last_error %}<tr><td colspan="4" class="bad">{{ h.last_error }}</td></tr>{% endif %}
+        {% endfor %}
+      </table></div>
+      {% else %}<p class="empty">No polls yet — run <code>tg run</code>.</p>{% endif %}
+    </section>
+
+    <section class="wide">
+      <h2>Watched screenings</h2>
+      {% if matches %}
+      <div class="scroll"><table>
+        <tr><th>when</th><th>title</th><th>where</th><th>free</th><th>watch</th><th></th></tr>
+        {% for m in matches %}
+        <tr>
+          <td class="num">{{ m.when }}</td>
+          <td>{{ m.title }}</td>
+          <td class="dim">{{ m.venue }}{% if m.auditorium %} · {{ m.auditorium }}{% endif %}</td>
+          <td class="num">
+            {% if m.free is not none %}
+              <span class="bar"><i style="width:{{ (m.free * 100)|round(1) }}%"></i></span>
+              <span class="{{ 'bad' if m.free < 0.05 else ('warn' if m.free < 0.25 else 'ok') }}">
+                {{ (m.free * 100)|round(1) }}%
+              </span>
+            {% else %}<span class="dim">—</span>{% endif %}
+            {% if m.sold_out %} <span class="bad">sold out</span>{% endif %}
+          </td>
+          <td class="dim">{{ m.watch }}</td>
+          <td>{% if m.url %}<a href="{{ m.url }}" target="_blank" rel="noopener">book</a>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </table></div>
+      {% else %}
+      <p class="empty">Nothing matches your watches yet. Try <code>tg watch test &lt;name&gt;</code>.</p>
+      {% endif %}
+    </section>
+
+    <section>
+      <h2>Watches</h2>
+      <div class="scroll"><table>
+        <tr><th>name</th><th>triggers</th><th>channels</th><th>assist</th></tr>
+        {% for w in watches %}
+        <tr {% if not w.enabled %}class="dim"{% endif %}>
+          <td>{{ w.name }}{% if not w.enabled %} (off){% endif %}</td>
+          <td class="dim">{{ w.triggers|join(', ') }}</td>
+          <td class="dim">{{ w.channels|join(', ') or '—' }}</td>
+          <td class="dim">{{ w.assist }}</td>
+        </tr>
+        {% endfor %}
+      </table></div>
+    </section>
+
+    <section>
+      <h2>Recent alerts</h2>
+      {% if alerts %}
+      <div class="scroll"><table>
+        <tr><th>when</th><th>alert</th><th>sent</th></tr>
+        {% for a in alerts %}
+        <tr>
+          <td class="dim num">{{ a.when }}</td>
+          <td>{% if a.url %}<a href="{{ a.url }}" target="_blank" rel="noopener">{{ a.title }}</a>
+              {% else %}{{ a.title }}{% endif %}</td>
+          <td>{% if a.suppressed %}<span class="dim">digested</span>
+              {% elif a.delivered %}<span class="ok">yes</span>
+              {% else %}<span class="bad">no</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </table></div>
+      {% else %}<p class="empty">No alerts yet.</p>{% endif %}
+    </section>
+  </div>
+</body>
+</html>

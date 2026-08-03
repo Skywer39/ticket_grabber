@@ -13,7 +13,6 @@ from tg.browser import _BLOCK_PATTERNS
 from tg.config import AssistConfig, SeatMapConfig
 from tg.core.normalize import SeatStatus
 
-
 # --------------------------------------------------------------- seat status
 
 
@@ -89,8 +88,9 @@ def test_selectors_are_overridable_from_config():
 
 
 async def test_reader_skips_work_while_blocked():
-    from tg.core.normalize import NormScreening
     from datetime import UTC, datetime
+
+    from tg.core.normalize import NormScreening
 
     reader = CinemaCitySeatReader(SeatMapConfig(backoff_after_block_seconds=3600))
     reader._trip_breaker()

@@ -36,6 +36,7 @@ tg = "tg.cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/tg"]
+artifacts = ["src/tg/web/templates/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

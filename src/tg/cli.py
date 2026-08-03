@@ -36,9 +36,11 @@ app = typer.Typer(
 watch_app = typer.Typer(no_args_is_help=True, help="Inspect and test watches.")
 notify_app = typer.Typer(no_args_is_help=True, help="Notification channels.")
 seatmap_app = typer.Typer(no_args_is_help=True, help="Tier-2 seat map tools.")
+adapter_app = typer.Typer(no_args_is_help=True, help="Build and repair source adapters.")
 app.add_typer(watch_app, name="watch")
 app.add_typer(notify_app, name="notify")
 app.add_typer(seatmap_app, name="seatmap")
+app.add_typer(adapter_app, name="adapter")
 
 console = Console()
 
@@ -476,6 +478,88 @@ def seatmap_probe(
         )
 
     asyncio.run(_run())
+
+
+@adapter_app.command("discover")
+def adapter_discover(
+    url: Annotated[str, typer.Argument(help="A page that lists showings")],
+    limit: int = 8,
+    draft: Annotated[
+        bool, typer.Option("--draft", help="Also ask a model for a field mapping")
+    ] = False,
+    config: ConfigOpt = "config.yaml",
+) -> None:
+    """Find the JSON endpoints a site feeds its own front end, ranked.
+
+    Read-only: it loads the page and watches the network. The ranked list alone is
+    usually enough to write an adapter by hand; --draft adds a suggested mapping.
+    """
+    cfg = _load(config)
+
+    async def _run() -> None:
+        from tg.agent.discover import discover_endpoints
+
+        console.print(f"loading [bold]{url}[/] and recording JSON traffic…")
+        candidates = await discover_endpoints(url, browser=cfg.seatmap)
+        if not candidates:
+            console.print("[yellow]no JSON endpoints seen[/] — the data may be server-rendered")
+            raise typer.Exit(1)
+
+        for c in candidates[:limit]:
+            colour = "green" if c.score >= 5 else ("yellow" if c.score >= 2 else "dim")
+            console.print(f"[{colour}]{c.describe()}[/]")
+
+        best = candidates[0]
+        if best.score < 5:
+            console.print("\n[yellow]Nothing looks strongly schedule-like.[/]")
+        if draft:
+            from tg.agent.scaffold import ModelUnavailable, draft_mapping
+
+            try:
+                result = draft_mapping(best)
+            except ModelUnavailable as exc:
+                console.print(f"[yellow]no draft:[/] {exc}")
+                return
+            console.print("\n[bold]suggested mapping[/]")
+            console.print(result.to_yaml())
+
+    asyncio.run(_run())
+
+
+@adapter_app.command("heal")
+def adapter_heal(config: ConfigOpt = "config.yaml") -> None:
+    """Diagnose adapters that have stopped returning data."""
+    _load(config)
+    from tg.agent.scaffold import diagnose_health
+
+    with db.session_scope() as session:
+        states = session.exec(
+            select(PollState).where(col(PollState.cache_key).like("%:health"))
+        ).all()
+
+    if not states:
+        console.print("[yellow]no poll history yet[/] — run `tg run --once` first")
+        raise typer.Exit(1)
+
+    for st in states:
+        verdict = diagnose_health(st.consecutive_empty, st.consecutive_errors)
+        style = "green" if verdict == "healthy" else "red"
+        console.print(f"[bold]{st.source}[/]: [{style}]{verdict}[/]")
+
+
+@app.command()
+def serve(
+    host: str = "127.0.0.1",
+    port: int = 8756,
+    config: ConfigOpt = "config.yaml",
+) -> None:
+    """Serve the status dashboard."""
+    import uvicorn
+
+    from tg.web.app import create_app
+
+    console.print(f"[green]dashboard on http://{host}:{port}[/]")
+    uvicorn.run(create_app(config), host=host, port=port, log_level="warning")
 
 
 @app.command()
