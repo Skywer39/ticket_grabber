@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 
 from sqlmodel import Session, col, select
 
-from tg.config import AppConfig, SeatPreference, WatchConfig, WatchMatch, WEEKDAYS
+from tg.config import WEEKDAYS, AppConfig, SeatPreference, WatchConfig, WatchMatch
 from tg.core.diff import Change, ChangeType
 from tg.core.normalize import Seat, parse_row_index, parse_seat_index
 from tg.core.timeutil import DEFAULT_TZ, format_local, from_db, to_local
@@ -102,8 +102,9 @@ def _seat_allowed(seat: Seat, pref: SeatPreference | None) -> bool:
         if pref.rows and not (pref.rows[0] <= row <= pref.rows[1]):
             return False
     idx = _seat_index(seat)
-    if idx is not None and pref.seat_range and not (pref.seat_range[0] <= idx <= pref.seat_range[1]):
-        return False
+    if idx is not None and pref.seat_range:
+        if not (pref.seat_range[0] <= idx <= pref.seat_range[1]):
+            return False
     return True
 
 

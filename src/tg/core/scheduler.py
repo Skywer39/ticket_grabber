@@ -21,9 +21,10 @@ import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
-from sqlmodel import Session, col, select
+from sqlmodel import Session, select
 
-from tg.config import AppConfig, HotWindow, WEEKDAYS
+from tg.adapters.base_http import PoliteClient
+from tg.config import WEEKDAYS, AppConfig, HotWindow
 from tg.core.adapter import Capability, SourceAdapter, build_adapter
 from tg.core.diff import (
     Change,
@@ -38,7 +39,6 @@ from tg.core.normalize import NormScreening
 from tg.core.ratelimit import jittered
 from tg.core.timeutil import DEFAULT_TZ, from_db, to_local, utcnow_aware
 from tg.core.watches import evaluate, screening_matches
-from tg.adapters.base_http import PoliteClient
 from tg.db import session_scope
 from tg.models import Alert, PollState, Screening, utcnow
 from tg.notify.base import Dispatcher
@@ -146,7 +146,8 @@ class SourceRunner:
         today = to_local(utcnow_aware(), self.tz_name).date()
         horizon = today + timedelta(days=self.horizon_days)
 
-        if self.cycle % VENUE_REFRESH_CYCLES == 0 and Capability.VENUES in self.adapter.capabilities:
+        refresh_venues = self.cycle % VENUE_REFRESH_CYCLES == 0
+        if refresh_venues and Capability.VENUES in self.adapter.capabilities:
             venues = await self.adapter.venues()
             with session_scope() as session:
                 sync_venues(session, venues)

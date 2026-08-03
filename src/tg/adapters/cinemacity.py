@@ -137,21 +137,19 @@ class CinemaCityAdapter(SourceAdapter):
     async def venues(self) -> list[NormVenue]:
         until = (date.today() + timedelta(days=self.days_ahead)).isoformat()
         body = await self._body(f"cinemas/with-event/until/{until}")
-        out: list[NormVenue] = []
-        for c in body.get("cinemas", []):
-            addr = c.get("addressInfo") or {}
-            out.append(
-                NormVenue(
-                    source=self.key,
-                    external_id=str(c["id"]),
-                    name=c.get("displayName") or str(c["id"]),
-                    city=addr.get("city") or c.get("groupId"),
-                    url=c.get("link"),
-                    latitude=c.get("latitude"),
-                    longitude=c.get("longitude"),
-                )
-            )
-        return out
+        return [self._to_venue(c) for c in body.get("cinemas", [])]
+
+    def _to_venue(self, c: dict) -> NormVenue:
+        addr = c.get("addressInfo") or {}
+        return NormVenue(
+            source=self.key,
+            external_id=str(c["id"]),
+            name=c.get("displayName") or str(c["id"]),
+            city=addr.get("city") or c.get("groupId"),
+            url=c.get("link"),
+            latitude=c.get("latitude"),
+            longitude=c.get("longitude"),
+        )
 
     async def calendar(self, since: date, until: date) -> list[date] | None:
         """Which dates have anything on sale, across the configured cinemas.

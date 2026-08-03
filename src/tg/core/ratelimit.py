@@ -93,7 +93,9 @@ class RobotsCache:
         try:
             resp = await client.get(url, headers={"User-Agent": self.user_agent})
             if resp.status_code >= 400:
-                log.debug("robots.txt %s -> HTTP %s, treating as unrestricted", url, resp.status_code)
+                log.debug(
+                    "robots.txt %s -> HTTP %s, treating as unrestricted", url, resp.status_code
+                )
                 return _RobotsEntry(parser=None, fetched_at=time.time(), missing=True)
             parser = RobotFileParser()
             parser.parse(resp.text.splitlines())

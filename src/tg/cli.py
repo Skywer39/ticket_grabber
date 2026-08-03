@@ -22,7 +22,7 @@ from tg.core.adapter import build_adapter, registered_adapters
 from tg.core.diff import ChangeType
 from tg.core.scheduler import Engine, is_hot
 from tg.core.timeutil import DEFAULT_TZ, format_local, from_db, to_local, utcnow_aware
-from tg.core.watches import evaluate, screening_matches
+from tg.core.watches import screening_matches
 from tg.models import Alert, Event, PollState, Screening, Venue
 from tg.notify.base import Dispatcher, build_notifiers
 
@@ -165,7 +165,9 @@ def probe(
             events, screenings = await adapter.screenings(target, target, dates=[target])
             titles = {e.external_id: e.title for e in events}
 
-        table = Table("time", "title", "auditorium", "formats", "free", "sold out", title=str(target))
+        table = Table(
+            "time", "title", "auditorium", "formats", "free", "sold out", title=str(target)
+        )
         shown = 0
         for s in sorted(screenings, key=lambda s: s.starts_at):
             name = titles.get(s.event_external_id, "?")

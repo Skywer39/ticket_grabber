@@ -52,7 +52,7 @@ class SourceAdapter(ABC):
         self.client = client
         self.options: dict[str, Any] = dict(config.options)
 
-    async def setup(self) -> None:
+    async def setup(self) -> None:  # noqa: B027 — optional hook, not every adapter needs it
         """Optional one-time preparation (e.g. deriving a tenant id from the site)."""
 
     @abstractmethod
@@ -83,7 +83,7 @@ class SourceAdapter(ABC):
         """Exact seat availability. ``None`` when the adapter cannot provide it."""
         return None
 
-    async def aclose(self) -> None:
+    async def aclose(self) -> None:  # noqa: B027 — only browser-backed adapters override
         """Release adapter-owned resources (browsers, etc.). The HTTP client is
         owned by the caller and is not closed here."""
 
