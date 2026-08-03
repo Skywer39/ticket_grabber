@@ -17,9 +17,11 @@ from sqlmodel import col, select
 
 from tg import db
 from tg.adapters.base_http import PoliteClient
+from tg.assist.checkout import CheckoutAssistant
 from tg.config import AppConfig, Secrets, load_config
 from tg.core.adapter import build_adapter, registered_adapters
 from tg.core.diff import ChangeType
+from tg.core.normalize import NormScreening
 from tg.core.scheduler import Engine, is_hot
 from tg.core.timeutil import DEFAULT_TZ, format_local, from_db, to_local, utcnow_aware
 from tg.core.watches import screening_matches
@@ -33,8 +35,10 @@ app = typer.Typer(
 )
 watch_app = typer.Typer(no_args_is_help=True, help="Inspect and test watches.")
 notify_app = typer.Typer(no_args_is_help=True, help="Notification channels.")
+seatmap_app = typer.Typer(no_args_is_help=True, help="Tier-2 seat map tools.")
 app.add_typer(watch_app, name="watch")
 app.add_typer(notify_app, name="notify")
+app.add_typer(seatmap_app, name="seatmap")
 
 console = Console()
 
@@ -399,6 +403,118 @@ def run(
         asyncio.run(_run())
     except KeyboardInterrupt:
         console.print("stopped")
+
+
+# --------------------------------------------------------------------- tier 2
+
+
+def _screening_or_exit(key: str):  # type: ignore[no-untyped-def]
+    with db.session_scope() as session:
+        row = session.exec(select(Screening).where(Screening.key == key)).first()
+        if row is None:
+            console.print(
+                f"[red]no screening {key!r} in the database[/] — "
+                "run `tg run --once` first, then `tg watch test <name>` to find keys"
+            )
+            raise typer.Exit(1)
+        ev = session.exec(select(Event).where(Event.key == row.event_key)).first()
+        return row, (ev.title if ev else "?")
+
+
+@seatmap_app.command("probe")
+def seatmap_probe(
+    screening_key: Annotated[str, typer.Argument(help="e.g. cinemacity_cz:220716")],
+    config: ConfigOpt = "config.yaml",
+) -> None:
+    """Read one screening's seat map and report exactly what was found.
+
+    Use this to confirm the selectors on your own machine: the booking host blocks
+    automated sessions from datacenter addresses, so the shipped defaults were
+    derived from the site's stylesheet rather than a live seat page.
+    """
+    cfg = _load(config)
+    row, title = _screening_or_exit(screening_key)
+
+    async def _run() -> None:
+        from tg.adapters.cinemacity_seats import CinemaCitySeatReader
+        from tg.browser import AccessBlocked
+
+        reader = CinemaCitySeatReader(cfg.seatmap)
+        screening = NormScreening(
+            source=row.source,
+            external_id=row.external_id,
+            event_external_id=row.event_key.split(":", 1)[-1],
+            venue_external_id=row.venue_key.split(":", 1)[-1],
+            starts_at=from_db(row.starts_at),
+            auditorium=row.auditorium,
+            booking_url=row.booking_url,
+        )
+        console.print(f"reading seats for [bold]{title}[/] — {row.auditorium} — {row.booking_url}")
+        try:
+            smap = await reader.read(screening)
+        except AccessBlocked as exc:
+            console.print(f"[red]blocked:[/] {exc}")
+            console.print(
+                "[yellow]This is the site refusing automation, not a bug.[/] "
+                "Ratio-based alerting still works; consider assist mode 'open'."
+            )
+            raise typer.Exit(2) from None
+        finally:
+            await reader.aclose()
+
+        if smap is None:
+            console.print("[yellow]no seat map returned[/] — see the log for why")
+            raise typer.Exit(1)
+
+        table = Table("row", "seat", "status", title=f"{len(smap.seats)} seats")
+        for s in smap.seats[:25]:
+            table.add_row(s.row_label, s.seat_label, str(s.status))
+        console.print(table)
+        console.print(
+            f"[green]{len(smap.available)} free of {len(smap.seats)}[/] "
+            f"({_pct(smap.availability_ratio)})"
+        )
+
+    asyncio.run(_run())
+
+
+@app.command()
+def assist(
+    screening_key: Annotated[str, typer.Argument(help="e.g. cinemacity_cz:220716")],
+    watch: Annotated[
+        str | None, typer.Option("--watch", help="Use this watch's seat profile")
+    ] = None,
+    config: ConfigOpt = "config.yaml",
+) -> None:
+    """Open checkout for a screening. Never buys — you finish the purchase."""
+    cfg = _load(config)
+    row, title = _screening_or_exit(screening_key)
+
+    if not cfg.assist.enabled:
+        console.print("[yellow]assist is disabled[/] — set `assist.enabled: true` in config.yaml")
+        raise typer.Exit(1)
+
+    profile = None
+    min_contiguous = 1
+    if watch:
+        w = cfg.watch(watch)
+        profile = cfg.profiles.get(w.seats.profile or "")
+        min_contiguous = w.seats.min_contiguous
+
+    async def _run() -> None:
+        assistant = CheckoutAssistant(cfg.assist)
+        result = await assistant.assist(
+            row.booking_url or "", screening_key, preference=profile, min_contiguous=min_contiguous
+        )
+        console.print(f"[bold]{title}[/] — {row.auditorium}")
+        console.print(result.summary())
+        if result.handed_over:
+            console.print(
+                "[yellow]A human check appeared.[/] Solve it in the browser window — "
+                "this tool will not do that for you."
+            )
+
+    asyncio.run(_run())
 
 
 if __name__ == "__main__":

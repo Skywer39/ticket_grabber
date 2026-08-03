@@ -50,7 +50,14 @@ class CinemaCityAdapter(SourceAdapter):
         Capability.SCREENINGS,
         Capability.CALENDAR,
         Capability.AVAILABILITY_RATIO,
+        Capability.SEATMAP,
     }
+
+    @staticmethod
+    def make_seat_reader(config):  # type: ignore[no-untyped-def]
+        from tg.adapters.cinemacity_seats import CinemaCitySeatReader
+
+        return CinemaCitySeatReader(config)
 
     def __init__(self, key, config, client) -> None:  # type: ignore[no-untyped-def]
         super().__init__(key, config, client)

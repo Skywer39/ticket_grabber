@@ -24,6 +24,7 @@ from datetime import date, datetime, timedelta
 from sqlmodel import Session, select
 
 from tg.adapters.base_http import PoliteClient
+from tg.assist.checkout import CheckoutAssistant
 from tg.config import WEEKDAYS, AppConfig, HotWindow
 from tg.core.adapter import Capability, SourceAdapter, build_adapter
 from tg.core.diff import (
@@ -98,10 +99,17 @@ def is_hot(now_local: datetime, windows: list[HotWindow]) -> bool:
 class SourceRunner:
     """Owns one configured source and everything needed to poll it once."""
 
-    def __init__(self, key: str, config: AppConfig, adapter: SourceAdapter) -> None:
+    def __init__(
+        self,
+        key: str,
+        config: AppConfig,
+        adapter: SourceAdapter,
+        assistant: CheckoutAssistant | None = None,
+    ) -> None:
         self.key = key
         self.config = config
         self.adapter = adapter
+        self.assistant = assistant
         self.cycle = 0
 
     @property
@@ -222,6 +230,34 @@ class SourceRunner:
             with session_scope() as session:
                 for alert in report.alerts:
                     session.merge(alert)
+
+        if self.assistant and report.alerts:
+            await self._maybe_assist(report.alerts)
+
+    async def _maybe_assist(self, alerts: list[Alert]) -> None:
+        """Open checkout for alerts belonging to a watch that armed it.
+
+        Deliberately at most one per cycle: this puts a browser window in front of a
+        human, and doing that repeatedly would be hostile.
+        """
+        assert self.assistant is not None
+        for alert in alerts:
+            try:
+                watch = self.config.watch(alert.watch_name)
+            except KeyError:
+                continue
+            if watch.assist != "arm" or not alert.url:
+                continue
+
+            profile = self.config.profiles.get(watch.seats.profile or "")
+            result = await self.assistant.assist(
+                alert.url,
+                alert.screening_key,
+                preference=profile,
+                min_contiguous=watch.seats.min_contiguous,
+            )
+            log.info("assist for %s: %s", alert.screening_key, result.summary())
+            return
 
     def _dense_range(self, start: date, end: date) -> list[date]:
         return [start + timedelta(days=i) for i in range((end - start).days + 1)]
@@ -369,6 +405,7 @@ class Engine:
         self.dispatcher = dispatcher
         self.client = PoliteClient(config.http)
         self.runners: list[SourceRunner] = []
+        self.assistant = CheckoutAssistant(config.assist) if config.assist.enabled else None
 
     async def setup(self) -> None:
         for key, source in self.config.sources.items():
@@ -376,7 +413,10 @@ class Engine:
                 continue
             adapter = build_adapter(key, source, self.client)
             await adapter.setup()
-            self.runners.append(SourceRunner(key, self.config, adapter))
+            if self.config.seatmap.enabled and Capability.SEATMAP in adapter.capabilities:
+                if reader := type(adapter).make_seat_reader(self.config.seatmap):
+                    adapter.attach_seat_reader(reader)
+            self.runners.append(SourceRunner(key, self.config, adapter, self.assistant))
         if not self.runners:
             raise RuntimeError("no enabled sources in config")
 

@@ -51,6 +51,16 @@ class SourceAdapter(ABC):
         self.config = config
         self.client = client
         self.options: dict[str, Any] = dict(config.options)
+        #: Optional tier-2 reader, attached by the engine when seat maps are enabled.
+        self._seat_reader: Any = None
+
+    @staticmethod
+    def make_seat_reader(config: Any) -> Any:
+        """Build this adapter's tier-2 seat reader, or ``None`` if it has none."""
+        return None
+
+    def attach_seat_reader(self, reader: Any) -> None:
+        self._seat_reader = reader
 
     async def setup(self) -> None:  # noqa: B027 — optional hook, not every adapter needs it
         """Optional one-time preparation (e.g. deriving a tenant id from the site)."""
@@ -80,12 +90,16 @@ class SourceAdapter(ABC):
         """
 
     async def seatmap(self, screening: NormScreening) -> SeatMap | None:
-        """Exact seat availability. ``None`` when the adapter cannot provide it."""
-        return None
+        """Exact seat availability. ``None`` when unavailable or not configured."""
+        if self._seat_reader is None:
+            return None
+        return await self._seat_reader.read(screening)
 
-    async def aclose(self) -> None:  # noqa: B027 — only browser-backed adapters override
-        """Release adapter-owned resources (browsers, etc.). The HTTP client is
-        owned by the caller and is not closed here."""
+    async def aclose(self) -> None:
+        """Release adapter-owned resources. The HTTP client belongs to the caller."""
+        if self._seat_reader is not None:
+            await self._seat_reader.aclose()
+            self._seat_reader = None
 
 
 _REGISTRY: dict[str, type[SourceAdapter]] = {}

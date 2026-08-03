@@ -83,26 +83,56 @@ class HotWindow(BaseModel):
 class AssistConfig(BaseModel):
     """Human-in-the-loop checkout assistance.
 
-    Disabled by default and gated per-watch. Never solves challenges — if a bot check
-    appears the browser is handed to the human.
+    Disabled by default and armed per-watch. Never solves challenges: if a bot check
+    appears, control goes to the human.
+
+    ``mode`` picks how far the assistance goes:
+
+    * ``open`` (default) — hand the deep link to your real desktop browser, where you
+      are already logged in and hold a normal session. Nothing to detect, nothing to
+      break, and no automated request ever touches the booking host.
+    * ``drive`` — additionally steer a Playwright browser using your own persistent
+      profile up to the seat picker. Faster, but the booking host actively blocks
+      automated sessions, so treat it as best-effort.
     """
 
     enabled: bool = False
-    browser_profile_dir: str = "data/browser-profile"
-    headless: bool = False
+    mode: Literal["open", "drive"] = "open"
     stop_before_payment: bool = True
     max_concurrent_sessions: int = 1
+    #: Only used by ``drive`` mode.
+    browser: BrowserConfig = Field(default_factory=lambda: BrowserConfig(headless=False))
 
 
-class SeatMapConfig(BaseModel):
-    """Tier-2 seat map reading. Expensive, so it is gated behind tier-1 deltas."""
+class BrowserConfig(BaseModel):
+    """Shared browser settings for the two features that need a real browser."""
 
-    enabled: bool = False
     browser_profile_dir: str = "data/browser-profile"
     headless: bool = True
+    executable_path: str | None = None
+    #: Extra Chromium flags. Normally empty; needed only behind TLS-terminating
+    #: proxies that cannot complete a modern handshake (e.g. --ssl-version-max=tls1.2).
+    browser_args: list[str] = Field(default_factory=list)
+    #: Defaults to HTTPS_PROXY from the environment when unset.
+    proxy: str | None = None
+    timeout_seconds: float = 45.0
+
+
+class SeatMapConfig(BrowserConfig):
+    """Tier-2 seat map reading. Expensive, so it is gated behind tier-1 deltas.
+
+    Off by default. The booking host is behind Cloudflare bot management and may
+    refuse automated sessions outright; when that happens the reader disables itself
+    rather than retrying, and ratio-based alerting carries on unaffected.
+    """
+
+    enabled: bool = False
     #: Never read a seat map for the same screening more often than this.
     min_interval_seconds: int = 300
-    timeout_seconds: float = 45.0
+    #: Stop trying for this long after the site blocks or challenges us.
+    backoff_after_block_seconds: int = 21600
+    #: CSS selectors, overridable without a code change when the site shifts.
+    selectors: dict[str, str] = Field(default_factory=dict)
 
 
 class SourceConfig(BaseModel):

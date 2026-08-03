@@ -22,17 +22,39 @@ poll:
       start: "06:00"
       end: "23:59"
 
+# Tier 2 — exact seat identities, read from the booking flow with a real browser.
+#
+# Off by default, and honestly: the booking host (tickets.cinemacity.cz) sits behind
+# Cloudflare bot management and returned a hard block page to an automated session
+# during development. Turn it on only if you are running from your own machine with a
+# browser profile you logged in with yourself. If it gets blocked it disables itself
+# and says so; tier-1 availability alerting keeps working regardless.
+#
+# Verify the selectors on your own machine first:
+#     tg seatmap probe cinemacity_cz:<screening-id>
 seatmap:
-  enabled: true                # tier 2: exact seats, needs a browser
+  enabled: false
   headless: true
-  min_interval_seconds: 300
+  min_interval_seconds: 300      # never re-read the same screening more often
+  backoff_after_block_seconds: 21600
   browser_profile_dir: "data/browser-profile"
+  # browser_args: ["--ssl-version-max=tls1.2"]   # only behind a TLS-terminating proxy
+  # selectors:                    # override if the site moves its markup
+  #   root: "[class*=choose-seats]"
+  #   seat: "[data-seat]"
 
+# Checkout assistance. Never buys anything, never solves a human check.
+#
+#   open  — hand the deep link to your real desktop browser (default, reliable)
+#   drive — additionally steer a Playwright browser using your own profile to the
+#           seat picker and pre-select matching seats (best-effort; may be blocked)
 assist:
-  enabled: false               # flip on once you have logged the profile into the site
-  headless: false
+  enabled: false
+  mode: open
   stop_before_payment: true
-  browser_profile_dir: "data/browser-profile"
+  browser:
+    headless: false
+    browser_profile_dir: "data/browser-profile"
 
 sources:
   cinemacity_cz:
