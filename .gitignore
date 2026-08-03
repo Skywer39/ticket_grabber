@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Runtime state — never commit
+config.yaml
+.env
+data/
+*.db
+*.db-journal
+browser-profile/

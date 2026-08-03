@@ -1,0 +1,87 @@
+# Copy to config.yaml and edit. Secrets live in .env, not here.
+
+database_url: "sqlite:///data/tg.db"
+
+http:
+  user_agent: "ticket-grabber/0.1 (self-hosted availability monitor)"
+  timeout_seconds: 25
+  requests_per_minute: 30      # per host, token-bucketed
+  max_retries: 3
+  respect_robots: true
+
+poll:
+  baseline_seconds: 900        # 15 min normally
+  hot_seconds: 45              # inside a hot window
+  jitter_ratio: 0.15
+  max_concurrency: 4
+  hot_windows:
+    # Cinema City publishes its new week early sometimes — that is exactly what burned us.
+    # Poll hard around the expected drop instead of trusting the announced day.
+    - name: "weekly program drop"
+      weekdays: [mon, tue, wed]
+      start: "06:00"
+      end: "23:59"
+
+seatmap:
+  enabled: true                # tier 2: exact seats, needs a browser
+  headless: true
+  min_interval_seconds: 300
+  browser_profile_dir: "data/browser-profile"
+
+assist:
+  enabled: false               # flip on once you have logged the profile into the site
+  headless: false
+  stop_before_payment: true
+  browser_profile_dir: "data/browser-profile"
+
+sources:
+  cinemacity_cz:
+    adapter: cinemacity
+    base_url: "https://www.cinemacity.cz"
+    options:
+      locale: "cz"
+      lang: "cs_CZ"
+      tenant_id: 10101         # set null to re-derive from the site's JS bundle at startup
+      cinemas: ["1052"]        # 1052 = Praha Flora (has the IMAX VOLVO 70mm screen)
+      days_ahead: 60
+
+profiles:
+  flora_imax:
+    venue: "Praha Flora"
+    auditorium_regex: "(?i)imax"
+    rows: [8, 14]
+    seat_range: [10, 20]
+    avoid_rows: [1, 2, 3]
+
+watches:
+  - name: "Odyssea IMAX 70mm"
+    source: cinemacity_cz
+    match:
+      title_regex: "(?i)odyss"
+      formats: [FILM_70MM]
+      auditorium_regex: "(?i)imax"
+      cinemas: ["1052"]
+      date_from: 2026-08-01
+      date_to: 2026-09-30
+      time_between: ["16:00", "23:00"]
+    seats:
+      profile: flora_imax
+      min_contiguous: 2
+    trigger:
+      on: [NEW_SCREENING, SEAT_FREED, AVAILABILITY_RISE]
+      availability_rise_min: 0.005
+    notify: [discord]
+    cooldown: 10m
+    assist: off
+
+  # Catch-all: tell me the moment *any* new 70mm screening is published at Flora,
+  # regardless of film. This is the rule that would have caught the early release.
+  - name: "Any new 70mm at Flora"
+    source: cinemacity_cz
+    match:
+      formats: [FILM_70MM]
+      cinemas: ["1052"]
+    trigger:
+      on: [NEW_SCREENING]
+    notify: [discord]
+    cooldown: 1h
