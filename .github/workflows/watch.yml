@@ -1,0 +1,114 @@
+name: watch
+
+# Polls the cinema on a schedule and pushes alerts to Discord, so monitoring keeps
+# running while you are away from your own server.
+#
+# Honest limits versus running `tg run` on a box you control:
+#   * GitHub's minimum cron granularity is 5 minutes, and scheduled workflows are
+#     routinely dispatched 10-15 minutes late when the platform is busy. There is no
+#     45-second hot mode here — each run is a single poll.
+#   * Runs can be skipped entirely during incidents.
+# It is still far better than nothing, and a newly published date is always fetched
+# in the very next run because new dates bypass the rotation.
+#
+# Setup: add a repository secret TG_DISCORD_WEBHOOK_URL (Settings -> Secrets and
+# variables -> Actions). Nothing else is required.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+    inputs:
+      reset_state:
+        description: "Discard saved state and re-seed the baseline"
+        type: boolean
+        default: false
+
+# Runs share one SQLite file; overlapping them would corrupt it.
+concurrency:
+  group: ticket-watch
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: pip install --quiet .
+
+      - name: Restore previous state
+        if: ${{ !inputs.reset_state }}
+        run: |
+          mkdir -p data
+          if ! git fetch --depth 1 origin state 2>/dev/null; then
+            echo "no state branch — this run will seed the baseline silently"
+            exit 0
+          fi
+          # Extract to a temp file first: redirecting straight onto data/tg.db would
+          # leave an empty (but valid) database behind if the extraction failed,
+          # silently discarding the baseline and re-seeding.
+          if git show FETCH_HEAD:data/tg.db > /tmp/tg.db 2>/dev/null && [ -s /tmp/tg.db ]; then
+            mv /tmp/tg.db data/tg.db
+            echo "restored $(stat -c%s data/tg.db) bytes of state"
+          else
+            rm -f /tmp/tg.db
+            echo "state branch carries no usable database — re-seeding"
+          fi
+
+      - name: Poll
+        env:
+          TG_DISCORD_WEBHOOK_URL: ${{ secrets.TG_DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ -z "$TG_DISCORD_WEBHOOK_URL" ]; then
+            echo "::warning::TG_DISCORD_WEBHOOK_URL is not set — alerts will be" \
+                 "recorded but not delivered"
+          fi
+          cp config.example.yaml config.yaml
+          tg run --once
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "### Poll result"
+            echo '```'
+            tg status --limit 8 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save state
+        if: success()
+        run: |
+          if [ ! -s data/tg.db ]; then
+            echo "::warning::no database to save — skipping"
+            exit 0
+          fi
+
+          # Checkpoint the WAL so the committed file is self-contained.
+          python -c "import sqlite3; c=sqlite3.connect('data/tg.db'); \
+            c.execute('PRAGMA wal_checkpoint(TRUNCATE)'); c.close()"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # An orphan branch rewritten each run keeps exactly one commit, so a
+          # database committed every 10 minutes never grows the repository.
+          git checkout --orphan state-tmp
+          # Tolerate an already-empty index; the step runs under `bash -e` and an
+          # unstaged tree would otherwise abort the save.
+          git rm -rf --cached . > /dev/null 2>&1 || true
+          git add -f data/tg.db
+          git commit -q -m "state $(date -u +%FT%TZ)"
+          git push -f -q origin state-tmp:state
+          echo "saved $(stat -c%s data/tg.db) bytes of state"

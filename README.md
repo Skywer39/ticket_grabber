@@ -68,6 +68,19 @@ Docker:
 docker compose up -d && docker compose logs -f poller
 ```
 
+## Running it when you're away from your own box
+
+`.github/workflows/watch.yml` polls on a schedule and pushes alerts to Discord, with
+state kept on an orphan `state` branch (rewritten each run, so it stays at one commit
+and never grows the repo). Add one repository secret — `TG_DISCORD_WEBHOOK_URL` — and
+it starts on its own.
+
+Worth knowing what you give up: GitHub's minimum cron granularity is 5 minutes and
+scheduled runs are routinely dispatched 10–15 minutes late, so there is no 45-second
+hot mode — each run is a single poll. A newly published date is still fetched in the
+very next run, because new dates bypass the rotation. Treat it as cover while you are
+away, not as a replacement for `tg run` on a box you control.
+
 ## Writing a watch
 
 Watches live in `config.yaml` so they stay diffable and version-controlled.
@@ -97,7 +110,22 @@ watches:
 ```
 
 The rule that would have prevented the original miss is the boring one: alert on
-`NEW_SCREENING` for any 70mm showing at your cinema, regardless of film.
+`NEW_SCREENING` for anything appearing in the hall you care about, regardless of film.
+
+Key that catch-all on the **auditorium**, not the format. The IMAX hall also hosts
+one-off events — concert films, anniversary screenings — that run without a `70-mm`
+attribute, and a format filter drops them silently.
+
+```yaml
+  - name: "Anything new in the IMAX hall"
+    source: cinemacity_cz
+    match:
+      auditorium_regex: "(?i)imax"
+      cinemas: ["1052"]
+    trigger: { on: [NEW_SCREENING] }
+    notify: [discord]
+    cooldown: 1h
+```
 
 Check it before trusting it:
 

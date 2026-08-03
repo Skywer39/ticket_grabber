@@ -15,10 +15,11 @@ poll:
   jitter_ratio: 0.15
   max_concurrency: 4
   hot_windows:
-    # Cinema City publishes its new week early sometimes — that is exactly what burned us.
-    # Poll hard around the expected drop instead of trusting the announced day.
-    - name: "weekly program drop"
-      weekdays: [mon, tue, wed]
+    # Every day, not just the announced one. The whole reason this exists is that the
+    # cinema published early, so treating the announced weekday as reliable would
+    # rebuild the original bug. ~12 requests/min against a 30/min budget.
+    # Overnight drops back to baseline: publishing at 04:00 is rare enough to accept.
+    - name: "program drop watch"
       start: "06:00"
       end: "23:59"
 
@@ -96,12 +97,17 @@ watches:
     cooldown: 10m
     assist: off
 
-  # Catch-all: tell me the moment *any* new 70mm screening is published at Flora,
-  # regardless of film. This is the rule that would have caught the early release.
-  - name: "Any new 70mm at Flora"
+  # Catch-all: anything newly published in the IMAX hall, whatever the film.
+  # This is the rule that would have caught the early release.
+  #
+  # Keyed on the auditorium rather than on `formats: [FILM_70MM]` deliberately. The
+  # hall also hosts one-off events — concert films, anniversary screenings — that run
+  # in IMAX without carrying the 70-mm attribute, and a format filter drops them
+  # silently.
+  - name: "Anything new in the IMAX hall"
     source: cinemacity_cz
     match:
-      formats: [FILM_70MM]
+      auditorium_regex: "(?i)imax"
       cinemas: ["1052"]
     trigger:
       on: [NEW_SCREENING]
