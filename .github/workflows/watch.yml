@@ -3,23 +3,33 @@ name: watch
 # Polls the cinema and pushes alerts to Discord, so monitoring keeps running while
 # you are away from your own server.
 #
-# Each run is a ~52-minute polling *session*, not a single poll. That shape is
-# deliberate: measured dispatch gaps for a `*/10` cron on this repository were 85, 75,
-# 60 and 65 minutes, because GitHub heavily deprioritises scheduled workflows. Putting
-# the loop inside the job means GitHub's throttling only decides when a session
-# starts, while the cadence within it is the poller's own — 45s during the configured
-# hot window, 15 min overnight.
+# Each run is a 5h40m polling *session*, not a single poll, because GitHub's scheduler
+# cannot be relied on for cadence. Measured on this repository: a `*/10` cron dispatched
+# at gaps of 85, 75, 60 and 65 minutes; an hourly cron dispatched at gaps of 205 and 266
+# minutes. Short sessions therefore left the site unwatched ~75% of the time.
 #
-# Requires a public repository: private repos meter Actions minutes (2,000/month free)
-# and hour-long jobs would exhaust that in a couple of days. Public repos are unmetered.
+# Sizing the session just under GitHub's 6-hour job ceiling fixes that. An hourly
+# dispatch now almost always lands while a session is still running, so it queues behind
+# the concurrency group and starts the moment the current one ends. The cron is no longer
+# the cadence — it is what keeps the chain unbroken. Cadence inside a session is the
+# poller's own: 45s during the configured hot window, 15 min overnight.
+#
+# Requires a public repository. Private repos meter Actions minutes (2,000/month free),
+# which a continuously running job would exhaust in under two days. Public repos are
+# unmetered.
+#
+# Trade-off accepted: state is committed only at session end, so an abrupt runner failure
+# loses up to ~5.7h of accumulated state. The blast radius is bounded — the next session
+# re-seeds the baseline and stays silent for one cycle — and that is cheaper than
+# fragmenting coverage into short sessions.
 #
 # Setup: add a repository secret TG_DISCORD_WEBHOOK_URL (Settings -> Secrets and
 # variables -> Actions). Nothing else is required.
 
 on:
   schedule:
-    # Hourly. A denser cron would only queue runs behind the concurrency group,
-    # since each run already occupies most of the hour.
+    # Hourly, so a dispatch reliably lands inside the running session and queues
+    # up behind it. A denser cron would add nothing: only one run can be pending.
     - cron: "0 * * * *"
   workflow_dispatch:
     inputs:
@@ -39,9 +49,10 @@ permissions:
 jobs:
   poll:
     runs-on: ubuntu-latest
-    # Longer than the 52-minute poll cap below, so the cap fires first and the state
-    # save still runs. GitHub would kill the job outright at its own limit.
-    timeout-minutes: 58
+    # Longer than the 340-minute poll cap below, so the cap fires first and the state
+    # save still runs; and under GitHub's own 6-hour ceiling, which would kill the job
+    # outright and lose the session's work.
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
 
@@ -87,7 +98,7 @@ jobs:
           # when the cap fires, which is the normal outcome here and must not be
           # treated as failure — otherwise the state save would be skipped and the
           # whole session's work lost.
-          timeout --signal=INT 52m tg run || status=$?
+          timeout --signal=INT 340m tg run || status=$?
           if [ "${status:-0}" -ne 0 ] && [ "${status:-0}" -ne 124 ] && [ "${status:-0}" -ne 130 ]; then
             echo "::error::poller exited with status ${status}"
             exit "${status}"

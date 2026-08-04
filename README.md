@@ -75,18 +75,26 @@ Discord, with state kept on an orphan `state` branch (rewritten each run, so it 
 at one commit and never grows the repo). Add one repository secret —
 `TG_DISCORD_WEBHOOK_URL` — and it starts on its own.
 
-Each run is a **~52-minute polling session**, not a single poll. That shape exists
-because GitHub throttles scheduled workflows hard: a `*/10` cron on this repo was
-measured dispatching at gaps of **85, 75, 60 and 65 minutes**. Putting the loop inside
-the job means GitHub only decides when a session *starts*; the cadence within it is
-the poller's own — 45s in the hot window, 15 min overnight. The cron is hourly for
-that reason, and `concurrency` keeps sessions from overlapping on the shared SQLite
-file.
+Each run is a **5h40m polling session**, not a single poll, because GitHub's scheduler
+cannot be trusted for cadence. Measured on this repo: a `*/10` cron dispatched at gaps
+of **85, 75, 60 and 65 minutes**; an hourly cron at gaps of **205 and 266 minutes**.
+With 52-minute sessions that left the site unwatched about three quarters of the time.
 
-Two caveats. This needs a **public repository**: private repos meter Actions minutes
-(2,000/month free) and hour-long jobs would burn through that in days. And a session
-can still be skipped entirely during a platform incident, so it is cover while you are
-away rather than a replacement for `tg run` on a box you control.
+Sizing the session just under GitHub's 6-hour job ceiling fixes it. An hourly dispatch
+now lands while a session is still running, queues behind the `concurrency` group, and
+starts the moment the current one ends — so sessions abut instead of leaving holes. The
+cron is no longer the cadence; it is what keeps the chain unbroken. Inside a session the
+cadence is the poller's own: 45s in the hot window, 15 min overnight.
+
+Three caveats, in order of how likely they are to bite:
+
+- Needs a **public repository**. Private repos meter Actions minutes (2,000/month free),
+  which a continuously running job exhausts in under two days.
+- State is committed only at session end, so an abrupt runner failure loses up to ~5.7h
+  of accumulated state. The next session re-seeds and stays silent for one cycle.
+- If a dispatch is missed entirely during a platform incident, the chain breaks and
+  coverage stops until the next one lands. This is cover while you are away, not a
+  replacement for `tg run` on a box you control.
 
 ## Writing a watch
 
