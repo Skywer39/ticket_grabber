@@ -13,7 +13,7 @@ import pytest
 from tg.cli import _channel_report
 from tg.config import AppConfig, Secrets
 from tg.models import Alert
-from tg.notify.base import Dispatcher, Notifier, build_notifiers
+from tg.notify.base import Dispatcher, Notifier, build_notifiers, redact
 
 
 class _Recorder(Notifier):
@@ -152,3 +152,61 @@ def test_channel_report_is_quiet_when_everything_is_wired(cfg_with_discord_watch
 def test_disabled_watches_do_not_raise_a_warning(cfg_with_discord_watch):
     cfg_with_discord_watch.watches[0].enabled = False
     assert _channel_report(cfg_with_discord_watch, {})[1] == []
+
+
+# ------------------------------------------------------------- redaction
+
+
+class _Leaky(Notifier):
+    """Raises the way httpx does: with the failing URL embedded in the message."""
+
+    name = "discord"
+    URL = "https://discord.com/api/webhooks/1533992788755218615/uL9vMPk5r3JGZ1ntvOS_Qhtok"
+
+    async def send(self, alert: Alert, client: httpx.AsyncClient) -> None:
+        raise RuntimeError(f"Client error '404 Not Found' for url '{self.URL}'")
+
+    def secret_values(self) -> tuple[str | None, ...]:
+        return (self.URL,)
+
+
+async def test_delivery_error_never_stores_the_credential():
+    """The recorded error is committed to the state branch and printed to CI logs,
+    both public on a public repo. A failing webhook must not leak itself."""
+    alert = _alert()
+    await Dispatcher({"discord": _Leaky()}).deliver([alert])
+
+    assert alert.delivery_error is not None
+    assert "404 Not Found" in alert.delivery_error      # cause still diagnosable
+    assert _Leaky.URL not in alert.delivery_error
+    assert "uL9vMPk5r3JGZ1ntvOS_Qhtok" not in alert.delivery_error
+
+
+def test_redact_scrubs_webhook_shapes_without_a_known_literal():
+    """Covers credentials this process does not hold — a token from another instance
+    quoted back in an upstream error, say."""
+    msg = "failed: https://discord.com/api/webhooks/999/SECRETTOKENVALUE"
+    out = redact(msg)
+    assert "SECRETTOKENVALUE" not in out
+    assert "discord.com/api/webhooks/***" in out
+
+
+def test_redact_scrubs_telegram_bot_tokens():
+    out = redact("POST https://api.telegram.org/bot123456:AAH-secret/sendMessage 401")
+    assert "AAH-secret" not in out
+    assert "401" in out
+
+
+def test_redact_removes_literal_secrets_of_any_shape():
+    out = redact("ntfy topic my-unguessable-topic rejected", ["my-unguessable-topic"])
+    assert "my-unguessable-topic" not in out
+    assert "rejected" in out
+
+
+def test_redact_ignores_short_values_that_would_mangle_text():
+    """A 3-character token would otherwise blank out unrelated substrings."""
+    assert redact("error 404 on channel", ["404"]) == "error 404 on channel"
+
+
+def test_redact_leaves_clean_text_untouched():
+    assert redact("discord: not configured") == "discord: not configured"

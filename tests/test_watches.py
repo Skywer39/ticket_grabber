@@ -159,7 +159,9 @@ def test_alert_fires_for_a_matching_screening(session, config, seeded):
     assert "Seats freed up" in alerts[0].title
     assert "IMAX VOLVO" in alerts[0].body
     assert alerts[0].channels == ["discord"]
-    assert alerts[0].url and "tickets.cinemacity.cz" in alerts[0].url
+    # Must be the openable router link, never the 404-ing /api/order endpoint.
+    assert alerts[0].url and "/cz/booking-router/launch/" in alerts[0].url
+    assert "/api/order/" not in alerts[0].url
 
 
 def test_non_matching_screening_is_ignored(session, config, seeded):

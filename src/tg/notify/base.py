@@ -8,7 +8,9 @@ config edit, not a code change.
 from __future__ import annotations
 
 import logging
+import re
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 
 import httpx
 
@@ -17,6 +19,32 @@ from tg.models import Alert
 
 log = logging.getLogger(__name__)
 
+#: Credential shapes that must never reach a log or the database.
+#:
+#: This matters because transport errors quote the URL they failed on: httpx renders a
+#: failed Discord POST as "Client error '404 Not Found' for url https://discord.com/
+#: api/webhooks/<id>/<token>". That string is recorded on the alert and committed to
+#: the state branch, and written to the CI log — both public on a public repository.
+_SECRET_PATTERNS = (
+    re.compile(r"(https://(?:ptb\.|canary\.)?discord(?:app)?\.com/api/webhooks/)[\w-]+/[\w-]+"),
+    re.compile(r"(https://api\.telegram\.org/bot)[\w:-]+"),
+)
+
+
+def redact(text: str, secrets: Iterable[str | None] = ()) -> str:
+    """Strip credentials from text destined for a log or the database.
+
+    Literal values are removed first — they are exact and cover channels whose
+    credential has no recognisable shape — then the patterns catch anything that
+    slipped through, such as a token belonging to a differently-configured instance.
+    """
+    for secret in secrets:
+        if secret and len(secret) >= 8:
+            text = text.replace(secret, "***")
+    for pattern in _SECRET_PATTERNS:
+        text = pattern.sub(r"\1***", text)
+    return text
+
 
 class Notifier(ABC):
     name: str
@@ -24,6 +52,10 @@ class Notifier(ABC):
     @abstractmethod
     async def send(self, alert: Alert, client: httpx.AsyncClient) -> None:
         """Deliver one alert. Raise on failure; the dispatcher records it."""
+
+    def secret_values(self) -> tuple[str | None, ...]:
+        """Credentials this notifier holds, so failures can be reported safely."""
+        return ()
 
     @staticmethod
     def _text(alert: Alert) -> str:
@@ -76,8 +108,9 @@ class Dispatcher:
                         delivered_any = True
                     except Exception as exc:  # noqa: BLE001 — one bad channel must not
                         # block the others; the error is recorded on the alert.
-                        errors.append(f"{channel}: {exc}")
-                        log.error("delivery to %s failed: %s", channel, exc)
+                        detail = redact(str(exc), notifier.secret_values())
+                        errors.append(f"{channel}: {detail}")
+                        log.error("delivery to %s failed: %s", channel, detail)
 
                 alert.delivered = delivered_any
                 alert.delivery_error = "; ".join(errors) or None

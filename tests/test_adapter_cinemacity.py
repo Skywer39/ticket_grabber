@@ -67,10 +67,35 @@ def test_screening_times_are_stored_as_utc(adapter, fixture_body):
     assert local.strftime("%Y-%m-%dT%H:%M") == body["events"][0]["eventDateTime"][:16]
 
 
-def test_maps_booking_deep_link(adapter, fixture_body):
+def test_booking_link_is_the_router_not_the_api_endpoint(adapter, fixture_body):
+    """`bookingLink` points at tickets.cinemacity.cz/api/order/{id}, which the site's
+    own payload labels `obsoleteBookingUrl` and which answers 404 "Error Occurred" —
+    a blank page. The router link is the entry point a human can open.
+
+    The earlier version of this test asserted the URL merely started with
+    tickets.cinemacity.cz, so it passed while every alert shipped a dead link."""
     body = fixture_body("film-events-1052-2026-08-04.json")
-    s = adapter._to_screening(body["events"][0], {})
-    assert s.booking_url and s.booking_url.startswith("https://tickets.cinemacity.cz/")
+    event = body["events"][0]
+    s = adapter._to_screening(event, {})
+
+    assert s.booking_url == event["bookingRouterLaunchLink"]
+    assert "/cz/booking-router/launch/" in s.booking_url
+    assert "/api/order/" not in s.booking_url
+
+
+def test_router_link_wins_even_though_booking_link_is_present(adapter, fixture_body):
+    body = fixture_body("film-events-1052-2026-08-04.json")
+    event = body["events"][0]
+    assert event.get("bookingLink")  # both fields exist; the chain must prefer one
+    assert adapter._to_screening(event, {}).booking_url != event["bookingLink"]
+
+
+def test_every_fixture_event_maps_to_an_openable_link(adapter, fixture_body):
+    """No sparse-field surprises: this must hold for the whole payload, not one row."""
+    for name in ("film-events-1052-2026-08-04.json", "film-events-1052-2026-08-06.json"):
+        for event in fixture_body(name)["events"]:
+            url = adapter._to_screening(event, {}).booking_url
+            assert url and "/api/order/" not in url
 
 
 def test_maps_films_including_czech_title(adapter, fixture_body):

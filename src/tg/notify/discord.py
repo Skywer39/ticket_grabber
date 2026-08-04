@@ -43,3 +43,6 @@ class DiscordNotifier(Notifier):
 
         resp = await client.post(self.webhook_url, json=payload)
         resp.raise_for_status()
+
+    def secret_values(self) -> tuple[str | None, ...]:
+        return (self.webhook_url,)

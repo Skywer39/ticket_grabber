@@ -21,6 +21,7 @@ from __future__ import annotations
 import logging
 import re
 from datetime import date, datetime, timedelta
+from urllib.parse import urlencode
 
 from tg.core.adapter import AdapterError, Capability, SourceAdapter, register_adapter
 from tg.core.normalize import (
@@ -247,7 +248,7 @@ class CinemaCityAdapter(SourceAdapter):
         starts_at = local_to_utc(datetime.fromisoformat(e["eventDateTime"]), self.timezone)
 
         composite = e.get("compositeBookingLink") or {}
-        booking_url = e.get("bookingLink") or composite.get("obsoleteBookingUrl")
+        booking_url = _booking_url(e, composite)
 
         # Languages come from a dedicated object here; merge in anything the attribute
         # parser also inferred so both encodings end up in one place.
@@ -271,3 +272,27 @@ class CinemaCityAdapter(SourceAdapter):
             languages=languages,
             sales_blocked=bool(composite.get("blockOnlineSales")),
         )
+
+
+def _booking_url(event: dict, composite: dict) -> str | None:
+    """Pick the link a human can actually open.
+
+    ``bookingLink`` looks like the obvious choice and is not: it points at
+    ``tickets.cinemacity.cz/api/order/{id}``, an endpoint the site's own front end
+    posts to. Opened directly it answers HTTP 404 with the body text "Error Occurred",
+    which renders as a blank page. The payload flags this itself — the same URL appears
+    under ``compositeBookingLink`` as ``obsoleteBookingUrl``.
+
+    ``bookingRouterLaunchLink`` is the real entry point (200, "Redirecting to
+    booking…") and was present on every event observed, live and in fixtures. The rest
+    of the chain is belt-and-braces for a payload that omits it.
+    """
+    if router := event.get("bookingRouterLaunchLink"):
+        return router
+
+    booking = composite.get("bookingUrl") or {}
+    if url := booking.get("url"):
+        query = urlencode(booking.get("params") or {})
+        return f"{url}?{query}" if query else url
+
+    return event.get("bookingLink") or composite.get("obsoleteBookingUrl")

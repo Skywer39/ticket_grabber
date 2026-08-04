@@ -46,3 +46,6 @@ class NtfyNotifier(Notifier):
             headers=headers,
         )
         resp.raise_for_status()
+
+    def secret_values(self) -> tuple[str | None, ...]:
+        return (self.token, self.topic)

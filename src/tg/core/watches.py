@@ -188,6 +188,9 @@ class _Resolved:
     formats: list[str]
     booking_url: str | None
     availability_ratio: float | None
+    #: Film page, e.g. /films/odyssea/7268s2r. A working link even if the booking
+    #: router is unavailable, and it lists every showtime for the title.
+    event_url: str | None = None
 
 
 def _resolve(session: Session, change: Change) -> _Resolved:
@@ -209,6 +212,7 @@ def _resolve(session: Session, change: Change) -> _Resolved:
             formats=sorted(str(f) for f in ns.formats),
             booking_url=ns.booking_url,
             availability_ratio=ns.availability_ratio,
+            event_url=ev.url if ev else None,
         )
 
     if change.screening_key:
@@ -225,6 +229,7 @@ def _resolve(session: Session, change: Change) -> _Resolved:
                 formats=list(row.formats or []),
                 booking_url=row.booking_url,
                 availability_ratio=row.availability_ratio,
+                event_url=ev.url if ev else None,
             )
 
     if change.event is not None:
@@ -399,6 +404,12 @@ def _build_alert(
         preview = ", ".join(s.split("|")[-2] + "-" + s.split("|")[-1] for s in freed[:8])
         lines.append(f"freed: {preview}{' …' if len(freed) > 8 else ''}")
 
+    # A second, always-valid link. The booking router is the right target but it is a
+    # redirect shim into a Cloudflare-fronted host; the film page is plain HTML and
+    # lists every showtime, so the alert stays actionable even if booking is unhappy.
+    if ctx.event_url and ctx.event_url != ctx.booking_url:
+        lines.append(f"all showtimes: {ctx.event_url}")
+
     return Alert(
         watch_name=watch.name,
         screening_key=dedupe_key,
@@ -406,7 +417,7 @@ def _build_alert(
         created_at=now,
         title=title,
         body="\n".join(lines),
-        url=ctx.booking_url,
+        url=ctx.booking_url or ctx.event_url,
         payload={
             "old": change.old,
             "new": change.new,

@@ -37,3 +37,6 @@ class TelegramNotifier(Notifier):
             },
         )
         resp.raise_for_status()
+
+    def secret_values(self) -> tuple[str | None, ...]:
+        return (self.bot_token,)
