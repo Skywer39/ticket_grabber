@@ -1,22 +1,26 @@
 name: watch
 
-# Polls the cinema on a schedule and pushes alerts to Discord, so monitoring keeps
-# running while you are away from your own server.
+# Polls the cinema and pushes alerts to Discord, so monitoring keeps running while
+# you are away from your own server.
 #
-# Honest limits versus running `tg run` on a box you control:
-#   * GitHub's minimum cron granularity is 5 minutes, and scheduled workflows are
-#     routinely dispatched 10-15 minutes late when the platform is busy. There is no
-#     45-second hot mode here — each run is a single poll.
-#   * Runs can be skipped entirely during incidents.
-# It is still far better than nothing, and a newly published date is always fetched
-# in the very next run because new dates bypass the rotation.
+# Each run is a ~52-minute polling *session*, not a single poll. That shape is
+# deliberate: measured dispatch gaps for a `*/10` cron on this repository were 85, 75,
+# 60 and 65 minutes, because GitHub heavily deprioritises scheduled workflows. Putting
+# the loop inside the job means GitHub's throttling only decides when a session
+# starts, while the cadence within it is the poller's own — 45s during the configured
+# hot window, 15 min overnight.
+#
+# Requires a public repository: private repos meter Actions minutes (2,000/month free)
+# and hour-long jobs would exhaust that in a couple of days. Public repos are unmetered.
 #
 # Setup: add a repository secret TG_DISCORD_WEBHOOK_URL (Settings -> Secrets and
 # variables -> Actions). Nothing else is required.
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    # Hourly. A denser cron would only queue runs behind the concurrency group,
+    # since each run already occupies most of the hour.
+    - cron: "0 * * * *"
   workflow_dispatch:
     inputs:
       reset_state:
@@ -35,7 +39,9 @@ permissions:
 jobs:
   poll:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Longer than the 52-minute poll cap below, so the cap fires first and the state
+    # save still runs. GitHub would kill the job outright at its own limit.
+    timeout-minutes: 58
     steps:
       - uses: actions/checkout@v4
 
@@ -69,13 +75,24 @@ jobs:
       - name: Poll
         env:
           TG_DISCORD_WEBHOOK_URL: ${{ secrets.TG_DISCORD_WEBHOOK_URL }}
+          PYTHONUNBUFFERED: "1"
         run: |
           if [ -z "$TG_DISCORD_WEBHOOK_URL" ]; then
             echo "::warning::TG_DISCORD_WEBHOOK_URL is not set — alerts will be" \
                  "recorded but not delivered"
           fi
           cp config.example.yaml config.yaml
-          tg run --once
+
+          # `tg run` loops until stopped, so cap it by wall clock. `timeout` exits 124
+          # when the cap fires, which is the normal outcome here and must not be
+          # treated as failure — otherwise the state save would be skipped and the
+          # whole session's work lost.
+          timeout --signal=INT 52m tg run || status=$?
+          if [ "${status:-0}" -ne 0 ] && [ "${status:-0}" -ne 124 ] && [ "${status:-0}" -ne 130 ]; then
+            echo "::error::poller exited with status ${status}"
+            exit "${status}"
+          fi
+          echo "polling session finished (exit ${status:-0})"
 
       - name: Summarise
         if: always()
@@ -88,7 +105,10 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Save state
-        if: success()
+        # always(), not success(): a session cut short still holds a valid database
+        # representing up to an hour of polling, and discarding it would make the
+        # next run re-seed and stay silent through a real change.
+        if: always()
         run: |
           if [ ! -s data/tg.db ]; then
             echo "::warning::no database to save — skipping"

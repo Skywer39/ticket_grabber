@@ -8,7 +8,10 @@ venv/
 
 # Runtime state — never commit
 config.yaml
-.env
+# Every .env variant, including .env.local and .env.production. The template is the
+# one exception; it holds placeholders only.
+.env*
+!.env.example
 data/
 *.db
 *.db-journal

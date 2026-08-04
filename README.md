@@ -70,16 +70,23 @@ docker compose up -d && docker compose logs -f poller
 
 ## Running it when you're away from your own box
 
-`.github/workflows/watch.yml` polls on a schedule and pushes alerts to Discord, with
-state kept on an orphan `state` branch (rewritten each run, so it stays at one commit
-and never grows the repo). Add one repository secret — `TG_DISCORD_WEBHOOK_URL` — and
-it starts on its own.
+`.github/workflows/watch.yml` runs the poller on a schedule and pushes alerts to
+Discord, with state kept on an orphan `state` branch (rewritten each run, so it stays
+at one commit and never grows the repo). Add one repository secret —
+`TG_DISCORD_WEBHOOK_URL` — and it starts on its own.
 
-Worth knowing what you give up: GitHub's minimum cron granularity is 5 minutes and
-scheduled runs are routinely dispatched 10–15 minutes late, so there is no 45-second
-hot mode — each run is a single poll. A newly published date is still fetched in the
-very next run, because new dates bypass the rotation. Treat it as cover while you are
-away, not as a replacement for `tg run` on a box you control.
+Each run is a **~52-minute polling session**, not a single poll. That shape exists
+because GitHub throttles scheduled workflows hard: a `*/10` cron on this repo was
+measured dispatching at gaps of **85, 75, 60 and 65 minutes**. Putting the loop inside
+the job means GitHub only decides when a session *starts*; the cadence within it is
+the poller's own — 45s in the hot window, 15 min overnight. The cron is hourly for
+that reason, and `concurrency` keeps sessions from overlapping on the shared SQLite
+file.
+
+Two caveats. This needs a **public repository**: private repos meter Actions minutes
+(2,000/month free) and hour-long jobs would burn through that in days. And a session
+can still be skipped entirely during a platform incident, so it is cover while you are
+away rather than a replacement for `tg run` on a box you control.
 
 ## Writing a watch
 
