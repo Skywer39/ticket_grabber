@@ -67,6 +67,37 @@ def _pct(value: float | None) -> str:
     return "—" if value is None else f"{value * 100:.2f}%"
 
 
+def _channel_report(cfg: AppConfig, notifiers: dict) -> tuple[str, list[str]]:
+    """Summarise which channels are wired up, and which watches want one that isn't.
+
+    A watch can only deliver through a channel that has credentials; naming one that
+    does not is silent misconfiguration, so it is surfaced everywhere the user might
+    look rather than only at delivery time.
+    """
+    configured = sorted(notifiers)
+    wanted = {c for w in cfg.watches if w.enabled for c in w.notify}
+    missing = sorted(wanted - set(configured))
+    summary = ", ".join(configured) if configured else "none"
+    return summary, missing
+
+
+def _report_channels(cfg: AppConfig, notifiers: dict) -> None:
+    summary, missing = _channel_report(cfg, notifiers)
+    if not notifiers:
+        console.print(
+            "[red]no notification channels configured[/] — alerts will be recorded "
+            "but not delivered. Set TG_DISCORD_WEBHOOK_URL in .env (or as a repository "
+            "secret) to fix."
+        )
+    else:
+        console.print(f"channels: [green]{summary}[/]")
+    if missing:
+        console.print(
+            f"[yellow]watches request {', '.join(missing)} but it has no credentials[/] "
+            "— those alerts will record a delivery error"
+        )
+
+
 # --------------------------------------------------------------------- setup
 
 
@@ -204,6 +235,7 @@ def status(config: ConfigOpt = "config.yaml", limit: int = 15) -> None:
         f"polling mode: [{'red' if hot else 'green'}]{'HOT' if hot else 'baseline'}[/] "
         f"({cfg.poll.hot_seconds if hot else cfg.poll.baseline_seconds}s)"
     )
+    _report_channels(cfg, build_notifiers(Secrets()))
 
     with db.session_scope() as session:
         health = Table("source", "last poll", "errors", "empty polls", "last error", title="health")
@@ -369,12 +401,15 @@ def run(
     cfg = _load(config)
 
     notifiers = {} if dry_run else build_notifiers(Secrets())
-    if not dry_run and not notifiers:
-        console.print(
-            "[yellow]no notification channels configured[/] — alerts will be stored "
-            "but not delivered. Fill in .env to fix."
-        )
-    dispatcher = Dispatcher(notifiers) if notifiers else None
+    if not dry_run:
+        _report_channels(cfg, notifiers)
+
+    # Always dispatch outside dry-run, even with zero notifiers. Skipping delivery
+    # entirely would leave alerts recorded as `delivered=0` with no `delivery_error`,
+    # which is indistinguishable from "nothing was sent yet" — the exact ambiguity
+    # that made a missing webhook secret take hours to diagnose. Going through the
+    # dispatcher records "discord: not configured" on the alert instead.
+    dispatcher = None if dry_run else Dispatcher(notifiers)
 
     async def _run() -> None:
         engine = Engine(cfg, dispatcher)

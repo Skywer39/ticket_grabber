@@ -37,6 +37,10 @@ on:
         description: "Discard saved state and re-seed the baseline"
         type: boolean
         default: false
+      test_notify:
+        description: "Send a test alert before polling, to prove the webhook works"
+        type: boolean
+        default: false
 
 # Runs share one SQLite file; overlapping them would corrupt it.
 concurrency:
@@ -93,6 +97,21 @@ jobs:
                  "recorded but not delivered"
           fi
           cp config.example.yaml config.yaml
+
+          # Put channel wiring on the run summary page. A 5h40m session's log is not
+          # somewhere anyone scrolls, and a silently unwired channel is the failure
+          # most likely to go unnoticed.
+          {
+            echo "### Channels"
+            echo '```'
+            tg status --limit 1 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | head -4
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "${{ inputs.test_notify }}" = "true" ]; then
+            echo "sending test alert…"
+            tg notify test discord
+          fi
 
           # `tg run` loops until stopped, so cap it by wall clock. `timeout` exits 124
           # when the cap fires, which is the normal outcome here and must not be
