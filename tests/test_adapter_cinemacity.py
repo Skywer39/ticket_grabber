@@ -98,6 +98,81 @@ def test_every_fixture_event_maps_to_an_openable_link(adapter, fixture_body):
             assert url and "/api/order/" not in url
 
 
+# ------------------------------------------------------------------ deep links
+
+
+def test_deep_link_opens_on_the_screenings_own_date(mapped):
+    """An undated link opens on today, which is the wrong day for every alert about a
+    future screening — and once today's showtimes have passed, the film page shows
+    "Bohužel tento film v kině ... nehrajeme" instead of anything useful."""
+    _, screenings = mapped("film-events-1052-2026-08-04.json")
+    s = next(x for x in screenings if x.auditorium == "IMAX VOLVO")
+
+    assert s.info_url == (
+        "https://www.cinemacity.cz/films/odyssea/7268s2r"
+        "#/buy-tickets-by-film"
+        "?in-cinema=prague&at=2026-08-04&for-movie=7268s2r&view-mode=list"
+    )
+
+
+def test_deep_link_uses_the_group_slug_not_the_cinema_id(mapped):
+    """Passing an id makes the app rewrite the fragment to the group anyway."""
+    _, screenings = mapped("film-events-1052-2026-08-04.json")
+    assert "in-cinema=prague" in screenings[0].info_url
+    assert "in-cinema=1052" not in screenings[0].info_url
+
+
+def test_late_screening_links_to_its_local_date_not_the_utc_one(adapter, fixture_body):
+    """20:30 Prague is 18:30 UTC the same day — but the naive trap is real for any
+    venue whose late shows cross midnight in UTC, so pin the wall date."""
+    adapter._to_venue(
+        {"id": "1052", "groupId": "prague", "link": "https://www.cinemacity.cz/cinemas/flora"}
+    )
+    body = fixture_body("film-events-1052-2026-08-04.json")
+    film = adapter._to_event(next(f for f in body["films"] if f["id"] == "7268s2r"))
+    late = next(e for e in body["events"] if e["eventDateTime"].endswith("T20:30:00"))
+
+    s = adapter._to_screening(late, {film.external_id: film})
+    assert "at=2026-08-04" in s.info_url
+    assert to_local(s.starts_at, "Europe/Prague").date().isoformat() == "2026-08-04"
+
+
+def test_venue_deep_link_keeps_the_cinema_id(mapped):
+    """The by-cinema route is the one place ``in-cinema`` really takes the venue id."""
+    _, screenings = mapped("film-events-1052-2026-08-04.json")
+    assert screenings[0].venue_info_url == (
+        "https://www.cinemacity.cz/cinemas/flora"
+        "#/buy-tickets-by-cinema?in-cinema=1052&at=2026-08-04&view-mode=list"
+    )
+
+
+def test_deep_link_falls_back_to_the_plain_film_page(adapter, fixture_body):
+    """An unknown cinema means no group slug. The film page still opens; it just
+    opens on today."""
+    body = fixture_body("film-events-1052-2026-08-04.json")
+    film = adapter._to_event(next(f for f in body["films"] if f["id"] == "7268s2r"))
+    event = next(e for e in body["events"] if e["filmId"] == "7268s2r")
+
+    s = adapter._to_screening(event, {film.external_id: film})
+    assert s.info_url == "https://www.cinemacity.cz/films/odyssea/7268s2r"
+    assert s.venue_info_url is None
+
+
+def test_deep_link_is_absent_when_the_film_has_no_page(adapter, fixture_body):
+    body = fixture_body("film-events-1052-2026-08-04.json")
+    assert adapter._to_screening(body["events"][0], {}).info_url is None
+
+
+def test_links_stay_out_of_the_content_hash(mapped, adapter, fixture_body):
+    """Otherwise the day a link shape changes reads as every screening being new."""
+    _, screenings = mapped("film-events-1052-2026-08-04.json")
+    body = fixture_body("film-events-1052-2026-08-04.json")
+    bare = [adapter._to_screening(e, {}) for e in body["events"]]
+
+    assert [s.info_url for s in screenings] != [s.info_url for s in bare]
+    assert [s.content_hash() for s in screenings] == [s.content_hash() for s in bare]
+
+
 def test_maps_films_including_czech_title(adapter, fixture_body):
     body = fixture_body("films.json")
     events = [adapter._to_event(f) for f in body["films"]]

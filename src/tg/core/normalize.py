@@ -172,6 +172,13 @@ class NormScreening:
     venue_name: str | None = None
     auditorium: str | None = None
     booking_url: str | None = None
+    #: A plain page that opens on *this screening's date* — what a notification links
+    #: to. Distinct from ``booking_url``, which is often an entrance to a stateful flow
+    #: and not GET-able at all.
+    info_url: str | None = None
+    #: The venue's programme for the same date. Secondary link, and the fallback when
+    #: the event has no page of its own.
+    venue_info_url: str | None = None
     sold_out: bool = False
     #: Fraction of seats still free (1.0 = empty house). ``None`` if the source
     #: does not publish it.
@@ -199,8 +206,10 @@ class NormScreening:
     def content_hash(self) -> str:
         """Hash of the fields whose change is worth reacting to.
 
-        Deliberately excludes cosmetic fields (poster, raw attribute ordering) so
-        harmless site churn does not produce alerts.
+        Deliberately excludes cosmetic fields (poster, raw attribute ordering, the
+        info URLs) so harmless site churn does not produce alerts. ``info_url``
+        especially: it embeds the screening's own date, so hashing it would turn the
+        day a link shape changes into a flood of fake "new screening" events.
         """
         payload = {
             "starts_at": self.starts_at.isoformat(),

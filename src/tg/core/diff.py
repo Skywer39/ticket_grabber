@@ -190,6 +190,7 @@ def sync_screenings(
             row.disappeared_at = None
 
         if row.content_hash == new_hash:
+            _apply_links(row, ns)
             session.add(row)
             continue
 
@@ -414,6 +415,8 @@ def _to_row(ns: NormScreening, content_hash: str, now: datetime) -> Screening:
         starts_at=for_db(ns.starts_at),
         auditorium=ns.auditorium,
         booking_url=ns.booking_url,
+        info_url=ns.info_url,
+        venue_info_url=ns.venue_info_url,
         sold_out=ns.sold_out,
         availability_ratio=ns.availability_ratio,
         sales_blocked=ns.sales_blocked,
@@ -428,10 +431,24 @@ def _to_row(ns: NormScreening, content_hash: str, now: datetime) -> Screening:
     )
 
 
+def _apply_links(row: Screening, ns: NormScreening) -> None:
+    """Refresh the info links without touching anything the diff reports on.
+
+    Kept separate from :func:`_apply` because it also runs for rows whose content hash
+    is unchanged — the links are deliberately outside the hash, so nothing else would
+    ever trigger a write, and a column added by a migration would stay NULL forever.
+    """
+    if ns.info_url and row.info_url != ns.info_url:
+        row.info_url = ns.info_url
+    if ns.venue_info_url and row.venue_info_url != ns.venue_info_url:
+        row.venue_info_url = ns.venue_info_url
+
+
 def _apply(row: Screening, ns: NormScreening, content_hash: str, now: datetime) -> None:
     row.starts_at = for_db(ns.starts_at)
     row.auditorium = ns.auditorium
     row.booking_url = ns.booking_url
+    _apply_links(row, ns)
     row.sold_out = ns.sold_out
     row.availability_ratio = ns.availability_ratio
     row.sales_blocked = ns.sales_blocked

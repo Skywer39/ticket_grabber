@@ -89,6 +89,29 @@ def config() -> AppConfig:
 
 
 @pytest.fixture
+def mapped(adapter, fixture_body):
+    """Map a captured payload exactly the way ``screenings()`` does.
+
+    Films are mapped first so each screening can see its film's page URL, and the
+    cinemas payload is loaded so the adapter knows each venue's group slug — both are
+    what the dated deep links are built from. Passing ``{}`` instead, as the older tests
+    do, silently exercises the no-deep-link fallback.
+    """
+    for c in fixture_body("cinemas.json")["cinemas"]:
+        adapter._to_venue(c)
+
+    def _map(name: str):
+        body = fixture_body(name)
+        events: dict = {}
+        for f in body["films"]:
+            ev = adapter._to_event(f)
+            events.setdefault(ev.external_id, ev)
+        return events, [adapter._to_screening(e, events) for e in body["events"]]
+
+    return _map
+
+
+@pytest.fixture
 def adapter():
     """Adapter instance for pure mapping tests — never makes a request."""
     from tg.adapters.cinemacity import CinemaCityAdapter

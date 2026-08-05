@@ -184,6 +184,15 @@ from a page that already holds a session, which a notification cannot do. So ale
 link to the film page and the cinema programme — both plain documents that open — and
 you pick the showtime there. One extra click, but it works.
 
+Those links carry the screening's **own date**, using the hash routes the site's
+booking widget reads (`#/buy-tickets-by-film?in-cinema=…&at=…&for-movie=…`). Without
+the date a link opens on today, which is never the day the alert is about — and once
+today's showtimes for that film have passed, the page has nothing left to show and
+answers *"Bohužel tento film v kině … nehrajeme"*. Two details that only testing
+reveals: the film route takes the **city group slug**, rewriting a cinema id to it,
+while the cinema route takes the **cinema id**; and the date must be the venue's wall
+date, not the UTC one, or late screenings link to the wrong day.
+
 **No bot-check solving, ever.** Not CAPTCHAs, not Turnstile, no evasion, no identity
 rotation, no retrying a refusal. When the site says no, this stops and tells you.
 
@@ -202,7 +211,7 @@ conditional GETs and backoff regardless.
 
 ```bash
 pip install -e '.[dev]'
-pytest          # 104 tests, run against payloads captured from the live API
+pytest          # 138 tests, run against payloads captured from the live API
 ruff check src tests
 ```
 

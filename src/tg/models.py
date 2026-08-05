@@ -73,6 +73,9 @@ class Screening(SQLModel, table=True):
     starts_at: datetime = Field(index=True)
     auditorium: str | None = None
     booking_url: str | None = None
+    #: Pages that open on this screening's date — the film's, and the venue's programme.
+    info_url: str | None = None
+    venue_info_url: str | None = None
     sold_out: bool = False
     availability_ratio: float | None = None
     sales_blocked: bool = False

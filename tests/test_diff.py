@@ -110,6 +110,28 @@ def test_absence_only_counts_on_dates_actually_polled(session, aug4):
     assert len(changes) == len(screenings)
 
 
+def test_links_appear_on_existing_rows_without_reporting_a_change(session, aug4, mapped):
+    """The exact shape of the upgrade: a database seeded by the previous version, then
+    polled by this one. The dated links must land on rows that already exist — they sit
+    outside the content hash, so nothing else would ever write them — and doing so must
+    not read as a change, or the first poll after a deploy alerts on every screening."""
+    from sqlmodel import select
+
+    from tg.models import Screening
+
+    events, bare = aug4                       # mapped the old way: no deep links
+    sync_events(session, events)
+    sync_screenings(session, "cinemacity_cz", bare, covered_dates={AUG_4})
+    assert session.exec(select(Screening)).first().info_url is None
+
+    _, linked = mapped("film-events-1052-2026-08-04.json")
+    assert sync_screenings(session, "cinemacity_cz", linked, covered_dates={AUG_4}) == []
+
+    rows = session.exec(select(Screening)).all()
+    assert all(r.info_url and "#/buy-tickets-by-film" in r.info_url for r in rows)
+    assert all("at=2026-08-04" in r.info_url for r in rows)
+
+
 def test_calendar_diff_catches_a_newly_published_week(session):
     """The cheap probe that would have caught the early release."""
     known = [date(2026, 8, d) for d in range(3, 25)]

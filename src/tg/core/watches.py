@@ -192,6 +192,9 @@ class _Resolved:
     event_url: str | None = None
     #: Cinema programme page, e.g. /cinemas/flora. Same idea, scoped to the venue.
     venue_url: str | None = None
+    #: The same two pages, but opened on the screening's own date.
+    info_url: str | None = None
+    venue_info_url: str | None = None
 
 
 def _resolve(session: Session, change: Change) -> _Resolved:
@@ -215,6 +218,8 @@ def _resolve(session: Session, change: Change) -> _Resolved:
             availability_ratio=ns.availability_ratio,
             event_url=ev.url if ev else None,
             venue_url=venue.url if venue else None,
+            info_url=ns.info_url,
+            venue_info_url=ns.venue_info_url,
         )
 
     if change.screening_key:
@@ -233,6 +238,8 @@ def _resolve(session: Session, change: Change) -> _Resolved:
                 availability_ratio=row.availability_ratio,
                 event_url=ev.url if ev else None,
                 venue_url=venue.url if venue else None,
+                info_url=row.info_url,
+                venue_info_url=row.venue_info_url,
             )
 
     if change.event is not None:
@@ -415,8 +422,14 @@ def _build_alert(
     # launcher auto-posts to a host that answers 403 to everyone. Neither survives
     # being clicked from a notification. Preferring the page is the right general
     # default; booking_url stays in the data for assist and the seat reader.
-    if ctx.venue_url and ctx.venue_url not in (ctx.event_url, ctx.booking_url):
-        lines.append(f"cinema programme: {ctx.venue_url}")
+    #
+    # Prefer the dated form of each page. An undated link opens on today, which is the
+    # wrong day for every alert about a future screening — and once today's showtimes
+    # for that film have passed, the page has nothing left to show at all.
+    url = ctx.info_url or ctx.event_url or ctx.venue_info_url or ctx.venue_url or ctx.booking_url
+    programme = ctx.venue_info_url or ctx.venue_url
+    if programme and programme not in (url, ctx.booking_url):
+        lines.append(f"cinema programme: {programme}")
 
     return Alert(
         watch_name=watch.name,
@@ -425,7 +438,7 @@ def _build_alert(
         created_at=now,
         title=title,
         body="\n".join(lines),
-        url=ctx.event_url or ctx.venue_url or ctx.booking_url,
+        url=url,
         payload={
             "old": change.old,
             "new": change.new,

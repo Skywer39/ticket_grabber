@@ -31,9 +31,15 @@ from tg.core.normalize import (
     NormVenue,
     parse_attributes,
 )
-from tg.core.timeutil import local_to_utc
+from tg.core.timeutil import local_to_utc, to_local
 
 log = logging.getLogger(__name__)
+
+#: Hash routes of the site's own "quickbook" widget. It boots from the fragment and
+#: re-reads it on ``hashchange``, so these open on the date they name rather than on
+#: today — which is the whole point of building them.
+BY_FILM_ROUTE = "#/buy-tickets-by-film"
+BY_CINEMA_ROUTE = "#/buy-tickets-by-cinema"
 
 #: Tenant ids seen in the wild for this platform. Used only when the id is not
 #: configured and cannot be scraped — see :meth:`CinemaCityAdapter._derive_tenant`.
@@ -71,6 +77,9 @@ class CinemaCityAdapter(SourceAdapter):
         self._tenant_id: str | None = (
             str(self.options["tenant_id"]) if self.options.get("tenant_id") else None
         )
+        #: cinema id -> ``{"group": city group slug, "url": cinema page}``, both needed
+        #: to build deep links. Filled by :meth:`_to_venue`.
+        self._cinema_meta: dict[str, dict[str, str | None]] = {}
 
     # ------------------------------------------------------------------ setup
 
@@ -82,6 +91,15 @@ class CinemaCityAdapter(SourceAdapter):
                 self._tenant_id,
                 self.key,
             )
+
+        if not self._cinema_meta:
+            # One request per process, purely to learn each cinema's group slug and
+            # page URL. Best-effort: without it deep links fall back to plain pages,
+            # which is a worse link, not a broken poller.
+            try:
+                await self.venues()
+            except Exception as exc:  # noqa: BLE001 — never fail setup over a nicety
+                log.warning("could not load cinema metadata for deep links: %s", exc)
 
     async def _derive_tenant(self) -> str:
         """Recover the tenant id without hardcoding it.
@@ -149,6 +167,10 @@ class CinemaCityAdapter(SourceAdapter):
 
     def _to_venue(self, c: dict) -> NormVenue:
         addr = c.get("addressInfo") or {}
+        # Recorded rather than returned: ``groupId`` has no place in the normalized
+        # vocabulary, but the deep-link builder needs it and this is the only place
+        # the cinemas payload is parsed.
+        self._cinema_meta[str(c["id"])] = {"group": c.get("groupId"), "url": c.get("link")}
         return NormVenue(
             source=self.key,
             external_id=str(c["id"]),
@@ -241,6 +263,36 @@ class CinemaCityAdapter(SourceAdapter):
             raw_attributes=list(f.get("attributeIds") or []),
         )
 
+    def _film_deep_link(
+        self, film_url: str | None, film_id: str, cinema_id: str, on_date: str
+    ) -> str | None:
+        """The film page, opened on ``on_date`` with that day's showtimes listed.
+
+        ``in-cinema`` takes the city *group* slug here, not the cinema id: passing an id
+        makes the app rewrite the fragment to the group anyway. Without a known group the
+        plain film page is still the right answer — it just opens on today.
+        """
+        if not film_url:
+            return None
+        group = (self._cinema_meta.get(cinema_id) or {}).get("group")
+        if not group:
+            return film_url
+        query = urlencode(
+            {"in-cinema": group, "at": on_date, "for-movie": film_id, "view-mode": "list"}
+        )
+        return f"{film_url}{BY_FILM_ROUTE}?{query}"
+
+    def _venue_deep_link(self, cinema_id: str, on_date: str) -> str | None:
+        """That cinema's whole programme for ``on_date``.
+
+        The sibling route, and the one place ``in-cinema`` really does take the venue id.
+        """
+        url = (self._cinema_meta.get(cinema_id) or {}).get("url")
+        if not url:
+            return None
+        query = urlencode({"in-cinema": cinema_id, "at": on_date, "view-mode": "list"})
+        return f"{url}{BY_CINEMA_ROUTE}?{query}"
+
     def _to_screening(self, e: dict, events: dict[str, NormEvent]) -> NormScreening:
         parsed = parse_attributes(e.get("attributeIds") or [])
 
@@ -256,15 +308,25 @@ class CinemaCityAdapter(SourceAdapter):
         for role, langs in parsed.languages.items():
             languages.setdefault(role, langs)
 
+        film_id, cinema_id = str(e["filmId"]), str(e["cinemaId"])
+        film = events.get(film_id)
+        # The date the *cinema* calls this screening. A 20:30 Prague show is 18:30 UTC
+        # the same day, but a 00:30 one is the previous day in UTC — link by wall date.
+        on_date = to_local(starts_at, self.timezone).date().isoformat()
+
         ratio = e.get("availabilityRatio")
         return NormScreening(
             source=self.key,
             external_id=str(e["id"]),
-            event_external_id=str(e["filmId"]),
-            venue_external_id=str(e["cinemaId"]),
+            event_external_id=film_id,
+            venue_external_id=cinema_id,
             starts_at=starts_at,
             auditorium=e.get("auditorium"),
             booking_url=booking_url,
+            info_url=self._film_deep_link(
+                film.url if film else None, film_id, cinema_id, on_date
+            ),
+            venue_info_url=self._venue_deep_link(cinema_id, on_date),
             sold_out=bool(e.get("soldOut")),
             availability_ratio=float(ratio) if ratio is not None else None,
             formats=parsed.formats,
