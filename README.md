@@ -176,6 +176,14 @@ page to an automated session. So:
   live seat page. Verify them on your own machine with `tg seatmap probe <key>` and
   override in config if needed.
 
+**Alerts link to pages, not to booking.** This site has no linkable booking URL at
+all: `bookingLink` is a POST-only endpoint (a GET returns 404 "Error Occurred"), and
+its own `bookingRouterLaunchLink` serves an auto-submitting form that posts to
+`tickets.rel.cinemacity.cz`, which answers 403 to everyone. Booking is entered by POST
+from a page that already holds a session, which a notification cannot do. So alerts
+link to the film page and the cinema programme — both plain documents that open — and
+you pick the showtime there. One extra click, but it works.
+
 **No bot-check solving, ever.** Not CAPTCHAs, not Turnstile, no evasion, no identity
 rotation, no retrying a refusal. When the site says no, this stops and tells you.
 

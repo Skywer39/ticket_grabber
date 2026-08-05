@@ -159,9 +159,12 @@ def test_alert_fires_for_a_matching_screening(session, config, seeded):
     assert "Seats freed up" in alerts[0].title
     assert "IMAX VOLVO" in alerts[0].body
     assert alerts[0].channels == ["discord"]
-    # Must be the openable router link, never the 404-ing /api/order endpoint.
-    assert alerts[0].url and "/cz/booking-router/launch/" in alerts[0].url
+    # Links to a page, not into the booking flow. On this site the booking link is
+    # POST-only and the launcher posts to a 403 host, so neither is clickable.
+    assert alerts[0].url == "https://www.cinemacity.cz/films/odyssea/7268s2r"
+    assert "tickets." not in alerts[0].url
     assert "/api/order/" not in alerts[0].url
+    assert "booking-router" not in alerts[0].url
 
 
 def test_non_matching_screening_is_ignored(session, config, seeded):
@@ -220,3 +223,50 @@ def test_watch_ignores_change_types_it_did_not_subscribe_to(session, config, see
         screening=imax,
     )
     assert evaluate(session, config, [drop]) == []
+
+
+def _blank_page_urls(session, screening, *, event: bool, venue: bool) -> None:
+    """Clear the page URLs for exactly the rows this screening resolves through."""
+    from sqlmodel import select as _select
+
+    from tg.models import Event as _Event
+    from tg.models import Venue as _Venue
+
+    if event:
+        ev = session.exec(_select(_Event).where(_Event.key == screening.event_key)).first()
+        ev.url = None
+        session.add(ev)
+    v = session.exec(_select(_Venue).where(_Venue.key == screening.venue_key)).first()
+    v.url = None if venue else "https://www.cinemacity.cz/cinemas/flora"
+    session.add(v)
+
+
+def test_alert_falls_back_to_the_cinema_page_when_the_film_has_none(session, config, seeded):
+    """Venue page is the next-best document when an event carries no URL."""
+    imax = next(s for s in seeded if s.auditorium == "IMAX VOLVO")
+    _blank_page_urls(session, imax, event=True, venue=False)
+
+    alerts = evaluate(session, config, [_rise(imax, 0.02)])
+    assert alerts[0].url == "https://www.cinemacity.cz/cinemas/flora"
+
+
+def test_booking_url_is_used_only_when_no_page_exists(session, config, seeded):
+    imax = next(s for s in seeded if s.auditorium == "IMAX VOLVO")
+    _blank_page_urls(session, imax, event=True, venue=True)
+
+    alerts = evaluate(session, config, [_rise(imax, 0.02)])
+    assert alerts[0].url == imax.booking_url
+
+
+def test_body_carries_the_cinema_programme_as_a_second_link(session, config, seeded):
+    from sqlmodel import select as _select
+
+    from tg.models import Venue as _Venue
+
+    venue = session.exec(_select(_Venue)).first()
+    venue.url = "https://www.cinemacity.cz/cinemas/flora"
+    session.add(venue)
+
+    imax = next(s for s in seeded if s.auditorium == "IMAX VOLVO")
+    body = evaluate(session, config, [_rise(imax, 0.02)])[0].body
+    assert "cinema programme: https://www.cinemacity.cz/cinemas/flora" in body
