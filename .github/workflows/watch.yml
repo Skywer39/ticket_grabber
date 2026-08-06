@@ -8,9 +8,9 @@ name: watch
 # at gaps of 85, 75, 60 and 65 minutes; an hourly cron dispatched at gaps of 205 and 266
 # minutes. Short sessions therefore left the site unwatched ~75% of the time.
 #
-# Sizing the session just under GitHub's 6-hour job ceiling fixes that. An hourly
-# dispatch now almost always lands while a session is still running, so it queues behind
-# the concurrency group and starts the moment the current one ends. The cron is no longer
+# Sizing the session just under GitHub's 6-hour job ceiling fixes that. A dispatch now
+# almost always lands while a session is still running, so it queues behind the
+# concurrency group and starts the moment the current one ends. The cron is no longer
 # the cadence — it is what keeps the chain unbroken. Cadence inside a session is the
 # poller's own: 45s during the configured hot window, 15 min overnight.
 #
@@ -28,9 +28,20 @@ name: watch
 
 on:
   schedule:
-    # Hourly, so a dispatch reliably lands inside the running session and queues
-    # up behind it. A denser cron would add nothing: only one run can be pending.
-    - cron: "0 * * * *"
+    # A dispatch only has to land inside the running session and queue up behind it, so
+    # for cadence one an hour would do — only one run can ever be pending, and the extra
+    # ticks collapse into that same slot.
+    #
+    # The density is for the broken case. When no session is running, every tick that
+    # fails costs the full interval in unwatched time, and ticks do fail: GitHub
+    # declined to allocate a hosted runner for two consecutive runs during the Actions
+    # outage of 2026-08-06 ("The job was not acquired by Runner of type hosted"), and
+    # the scheduler itself skipped hourly ticks by 205 and 266 minutes under load. More
+    # attempts is the only lever there is; at */15 a lost hour costs 15 minutes.
+    #
+    # Costs 4x the workflow-failure emails while Actions is down, which is the price of
+    # the shorter hole. Drop to */30 if that grates.
+    - cron: "*/15 * * * *"
   workflow_dispatch:
     inputs:
       reset_state:

@@ -57,6 +57,11 @@ class PollConfig(BaseModel):
     max_concurrency: int = 4
     #: Windows during which every source polls at ``hot_seconds``.
     hot_windows: list[HotWindow] = Field(default_factory=list)
+    #: Announce on the alert channels when a session resumes after a hole this long.
+    #: Handover between sessions is seconds, and a session queued behind a running one
+    #: still leaves polling covered, so a gap this size means nobody was watching.
+    #: 0 disables.
+    gap_alert_minutes: int = Field(90, ge=0)
 
 
 class HotWindow(BaseModel):

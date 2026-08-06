@@ -38,7 +38,7 @@ from tg.core.diff import (
 )
 from tg.core.normalize import NormScreening
 from tg.core.ratelimit import jittered
-from tg.core.timeutil import DEFAULT_TZ, from_db, to_local, utcnow_aware
+from tg.core.timeutil import DEFAULT_TZ, format_local, from_db, to_local, utcnow_aware
 from tg.core.watches import evaluate, screening_matches
 from tg.db import session_scope
 from tg.models import Alert, PollState, Screening, utcnow
@@ -435,8 +435,63 @@ class Engine:
         base = self.config.poll.hot_seconds if hot else self.config.poll.baseline_seconds
         return jittered(base, self.config.poll.jitter_ratio)
 
+    async def coverage_gap_alert(self) -> Alert | None:
+        """Report on the alert channels that nobody was polling for a while.
+
+        What stops this project is never the poller — it is CI. A runner GitHub could
+        not allocate, or a session killed mid-flight, leaves the site unwatched and says
+        so only in a workflow-failure email. So the first thing a resuming session does
+        is name the hole it just came out of, on the channel that is actually read.
+
+        Returns the alert it sent, or ``None`` when there was no gap worth reporting.
+        """
+        threshold = self.config.poll.gap_alert_minutes
+        if not threshold or self.dispatcher is None:
+            return None
+
+        with session_scope() as session:
+            last = session.exec(
+                select(PollState.last_polled_at)
+                .where(PollState.cache_key.endswith(":health"))  # type: ignore[union-attr]
+                .where(PollState.last_polled_at.is_not(None))  # type: ignore[union-attr]
+                .order_by(PollState.last_polled_at.desc())  # type: ignore[union-attr]
+            ).first()
+
+        # No health row means a seeded baseline rather than a gap — there is no earlier
+        # poll to have been late for, and alerting here would fire on every fresh start.
+        if last is None:
+            return None
+
+        gap = utcnow_aware() - from_db(last)
+        if gap < timedelta(minutes=threshold):
+            return None
+
+        hours, minutes = divmod(int(gap.total_seconds()) // 60, 60)
+        tz_name = self.runners[0].tz_name if self.runners else None
+        alert = Alert(
+            watch_name="monitor",
+            screening_key="monitor:coverage",
+            change_type="COVERAGE_GAP",
+            title=f"Monitoring resumed after a {hours}h {minutes:02d}m gap",
+            body=(
+                f"Nothing polled since {format_local(from_db(last), tz_name)}.\n"
+                "Anything published during the gap is still caught by the next poll, "
+                "just that much later."
+            ),
+            channels=list(self.dispatcher.notifiers),
+        )
+        log.warning("coverage gap of %dh %02dm — alerting", hours, minutes)
+
+        # Same path as poll alerts (see `_poll_inner`): deliver first, then persist, so
+        # the delivery outcome is recorded on the row rather than guessed at later.
+        await self.dispatcher.deliver([alert])
+        with session_scope() as session:
+            session.merge(alert)
+        return alert
+
     async def run_forever(self, stop: asyncio.Event | None = None) -> None:
         stop = stop or asyncio.Event()
+        await self.coverage_gap_alert()
         while not stop.is_set():
             for report in await self.poll_once():
                 log.info("%s", report.summary())

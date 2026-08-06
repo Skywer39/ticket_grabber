@@ -14,6 +14,9 @@ poll:
   hot_seconds: 45              # inside a hot window
   jitter_ratio: 0.15
   max_concurrency: 4
+  # Say so on the alert channels when a session resumes after a hole this long — a
+  # CI outage stops the poller silently, and the channel you watch should know. 0 off.
+  gap_alert_minutes: 90
   hot_windows:
     # Every day, not just the announced one. The whole reason this exists is that the
     # cinema published early, so treating the announced weekday as reliable would
