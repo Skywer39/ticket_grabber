@@ -6,6 +6,7 @@ read/diffed freely, while tokens and webhook URLs stay in ``.env``.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from datetime import date, time
@@ -15,6 +16,8 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+log = logging.getLogger(__name__)
 
 WEEKDAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
 
@@ -214,6 +217,17 @@ class WatchTrigger(BaseModel):
     availability_drop_min: float = 0.05
     #: Only alert while the screening still has at least this fraction free.
     max_availability: float | None = None
+    #: How many seats above the screening's own resting level count as worth waking for.
+    #:
+    #: Preferred over ``availability_rise_min``, which is a fraction and therefore means
+    #: a different number of seats in every hall: 0.005 is under two seats in a 385-seat
+    #: IMAX but half a seat in a 100-seat screen. It also measures against the floor
+    #: rather than the previous reading, so the permanently-unsold seats that a
+    #: near-sold-out house rests on stop counting as availability.
+    #:
+    #: Ignored when the hall's capacity cannot be estimated; the ratio threshold applies
+    #: then instead.
+    min_seats_above_floor: int | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -283,6 +297,7 @@ class AppConfig(BaseModel):
                     f"watch {w.name!r} references unknown seat profile {w.seats.profile!r}; "
                     f"known profiles: {sorted(self.profiles)}"
                 )
+            _warn_unusable_criteria(w)
         return self
 
     def watch(self, name: str) -> WatchConfig:
@@ -290,6 +305,33 @@ class AppConfig(BaseModel):
             if w.name == name:
                 return w
         raise KeyError(f"no watch named {name!r}; known: {[w.name for w in self.watches]}")
+
+
+#: Criteria that need a screening to evaluate, and so cannot constrain a ``NEW_DATE``
+#: change — the calendar probe returns dates and nothing else.
+_SCREENING_ONLY_CRITERIA = ("title_regex", "auditorium_regex", "formats", "cinemas")
+
+
+def _warn_unusable_criteria(w: WatchConfig) -> None:
+    """Say so when a watch is filtering on something its trigger cannot see.
+
+    A watch reading ``on: [NEW_DATE]`` with ``auditorium_regex: "(?i)imax"`` looks like
+    it means "tell me when a new date appears in the IMAX hall". It cannot: a new date
+    is just a date. The watch fires for every new date at the source, which is a
+    surprise worth one line at startup rather than a silent difference in meaning.
+    """
+    if "NEW_DATE" not in w.trigger.events:
+        return
+    unusable = [c for c in _SCREENING_ONLY_CRITERIA if getattr(w.match, c, None)]
+    if unusable:
+        log.warning(
+            "watch %r triggers on NEW_DATE, so %s cannot apply — a new date carries no "
+            "film, hall or format. It will fire for any new date on source %r; use a "
+            "separate NEW_SCREENING watch to filter by hall.",
+            w.name,
+            ", ".join(unusable),
+            w.source,
+        )
 
 
 PollConfig.model_rebuild()

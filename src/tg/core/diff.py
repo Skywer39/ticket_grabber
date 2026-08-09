@@ -17,7 +17,7 @@ from typing import Any
 from sqlmodel import Session, col, select
 
 from tg.core.normalize import NormEvent, NormScreening, NormVenue, SeatMap
-from tg.core.timeutil import for_db, from_db, utcnow_aware
+from tg.core.timeutil import DEFAULT_TZ, for_db, from_db, to_local, utcnow_aware
 from tg.models import (
     Event,
     PollState,
@@ -153,11 +153,16 @@ def sync_screenings(
     *,
     covered_dates: set[date] | None = None,
     detect_removals: bool = True,
+    tz_name: str = DEFAULT_TZ,
+    now: datetime | None = None,
 ) -> list[Change]:
     """Upsert screenings and return everything that changed.
 
-    ``covered_dates`` tells the engine which days this poll actually looked at, so a
-    screening missing from a partial poll is not mistaken for a cancelled one.
+    ``covered_dates`` tells the engine which days this poll actually looked at *and got
+    an answer for*, so a screening missing from a partial poll is not mistaken for a
+    cancelled one. ``tz_name`` is the venue's timezone, used to compare those days
+    against screening dates the way the cinema itself numbers them. ``now`` is injectable
+    so tests can place a fixed set of captured screenings before or after their showtime.
     """
     keys = [s.key for s in screenings] or [""]
     existing = {
@@ -165,7 +170,7 @@ def sync_screenings(
         for s in session.exec(select(Screening).where(col(Screening.key).in_(keys))).all()
     }
     changes: list[Change] = []
-    now = utcnow()
+    now = now or utcnow()
 
     for ns in screenings:
         row = existing.get(ns.key)
@@ -199,7 +204,9 @@ def sync_screenings(
         session.add(row)
 
     if detect_removals and covered_dates:
-        changes.extend(_detect_removals(session, source, screenings, covered_dates, now))
+        changes.extend(
+            _detect_removals(session, source, screenings, covered_dates, now, tz_name)
+        )
 
     for ch in changes:
         if ch.screening_key:
@@ -239,7 +246,13 @@ def _compare(row: Screening, ns: NormScreening, source: str) -> list[Change]:
             change(
                 kind,
                 {"availability_ratio": old_ratio},
-                {"availability_ratio": new_ratio},
+                # The floor as it stood *before* this reading, so the watch layer can
+                # ask the question that matters — how far above its resting level did
+                # this screening just move — without going back to the database.
+                {
+                    "availability_ratio": new_ratio,
+                    "availability_floor": _floor_before(row),
+                },
             )
         )
 
@@ -272,6 +285,7 @@ def _detect_removals(
     screenings: list[NormScreening],
     covered_dates: set[date],
     now: datetime,
+    tz_name: str = DEFAULT_TZ,
 ) -> list[Change]:
     """Flag screenings that vanished from days we fully polled."""
     seen_keys = {s.key for s in screenings}
@@ -286,8 +300,17 @@ def _detect_removals(
     for row in candidates:
         if row.key in seen_keys:
             continue
-        if from_db(row.starts_at).date() not in covered_dates:
+        starts_at = from_db(row.starts_at)
+        # Compare the day the *cinema* files this screening under. A 20:30 Prague show
+        # is 18:30 UTC the same day, but a 00:30 one is the previous day in UTC, so a
+        # UTC comparison against local-dated targets silently mismatches the late shows.
+        if to_local(starts_at, tz_name).date() not in covered_dates:
             continue  # we did not look at that day, so absence proves nothing
+        if starts_at <= now:
+            # The site drops showtimes once they have begun. That is the film starting,
+            # not the screening being cancelled, and reporting it would churn the change
+            # log every day and fire a false alert for anyone watching removals.
+            continue
         row.disappeared_at = now
         session.add(row)
         out.append(
@@ -395,6 +418,17 @@ def record_seatmap(
 # ----------------------------------------------------------------- row helpers
 
 
+def _floor_before(row: Screening) -> float | None:
+    """This screening's resting level as of the last poll.
+
+    Rows written before the column existed carry ``None``; the current ratio is the
+    best available stand-in, and the true floor re-establishes itself from there.
+    """
+    if row.availability_floor is not None:
+        return row.availability_floor
+    return row.availability_ratio
+
+
 def _snapshot(ns: NormScreening) -> dict[str, Any]:
     return {
         "starts_at": ns.starts_at.isoformat(),
@@ -419,6 +453,7 @@ def _to_row(ns: NormScreening, content_hash: str, now: datetime) -> Screening:
         venue_info_url=ns.venue_info_url,
         sold_out=ns.sold_out,
         availability_ratio=ns.availability_ratio,
+        availability_floor=ns.availability_ratio,
         sales_blocked=ns.sales_blocked,
         formats=sorted(str(f) for f in ns.formats),
         languages=ns.languages,
@@ -450,6 +485,10 @@ def _apply(row: Screening, ns: NormScreening, content_hash: str, now: datetime) 
     row.booking_url = ns.booking_url
     _apply_links(row, ns)
     row.sold_out = ns.sold_out
+    # Ratchet the floor down before overwriting the ratio, so a new low simply becomes
+    # the resting level rather than reading as a rise above the old one.
+    known = [r for r in (_floor_before(row), ns.availability_ratio) if r is not None]
+    row.availability_floor = min(known) if known else None
     row.availability_ratio = ns.availability_ratio
     row.sales_blocked = ns.sales_blocked
     row.formats = sorted(str(f) for f in ns.formats)

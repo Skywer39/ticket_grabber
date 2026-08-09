@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -97,15 +97,24 @@ def test_absence_only_counts_on_dates_actually_polled(session, aug4):
     """A partial poll must not be mistaken for cancellations — this is the guard that
     stops a rotating fetch from inventing SCREENING_REMOVED for every other date."""
     events, screenings = aug4
+    # The captured payload is a past date by now, and removals are only reported for
+    # screenings still to come, so judge it from the morning it was captured.
+    before_showtime = datetime(2026, 8, 4, 0, 0, tzinfo=UTC)
     sync_events(session, events)
-    sync_screenings(session, "cinemacity_cz", screenings, covered_dates={AUG_4})
+    sync_screenings(
+        session, "cinemacity_cz", screenings, covered_dates={AUG_4}, now=before_showtime
+    )
 
     # Poll a different day and see nothing: the 4th's screenings are still fine.
-    changes = sync_screenings(session, "cinemacity_cz", [], covered_dates={AUG_6})
+    changes = sync_screenings(
+        session, "cinemacity_cz", [], covered_dates={AUG_6}, now=before_showtime
+    )
     assert changes == []
 
     # Poll the 4th and see nothing: now they really are gone.
-    changes = sync_screenings(session, "cinemacity_cz", [], covered_dates={AUG_4})
+    changes = sync_screenings(
+        session, "cinemacity_cz", [], covered_dates={AUG_4}, now=before_showtime
+    )
     assert {c.change_type for c in changes} == {ChangeType.SCREENING_REMOVED}
     assert len(changes) == len(screenings)
 
@@ -148,3 +157,78 @@ def test_calendar_diff_is_quiet_when_nothing_is_published(session):
     dates = [date(2026, 8, d) for d in range(3, 25)]
     sync_calendar(session, "cinemacity_cz", dates)
     assert sync_calendar(session, "cinemacity_cz", dates) == []
+
+
+def test_a_date_that_answered_with_nothing_is_not_coverage(session, aug4):
+    """The flapping this fixes: five days in production marked future IMAX screenings
+    removed and un-removed them on the next poll. A date the site answered emptily is
+    indistinguishable from a date whose whole slate was cancelled, so the scheduler now
+    only counts dates that came back with something — and if it ever passes one anyway,
+    an empty screening list must not be read as proof."""
+    events, screenings = aug4
+    before_showtime = datetime(2026, 8, 4, 0, 0, tzinfo=UTC)
+    sync_events(session, events)
+    sync_screenings(
+        session, "cinemacity_cz", screenings, covered_dates={AUG_4}, now=before_showtime
+    )
+
+    # Nothing came back at all. Absence of evidence, not evidence of absence.
+    changes = sync_screenings(
+        session, "cinemacity_cz", [], covered_dates=set(), now=before_showtime
+    )
+    assert changes == []
+
+
+def test_a_screening_that_has_already_started_is_not_a_removal(session, aug4):
+    """The site drops showtimes once they begin. That is the film starting, not a
+    cancellation, and reporting it churned the change log every single day."""
+    events, screenings = aug4
+    sync_events(session, events)
+    sync_screenings(
+        session,
+        "cinemacity_cz",
+        screenings,
+        covered_dates={AUG_4},
+        now=datetime(2026, 8, 4, 0, 0, tzinfo=UTC),
+    )
+
+    # Same day, but after every showtime has begun.
+    changes = sync_screenings(
+        session,
+        "cinemacity_cz",
+        [],
+        covered_dates={AUG_4},
+        now=datetime(2026, 8, 5, 0, 0, tzinfo=UTC),
+    )
+    assert changes == []
+
+
+def test_late_night_screenings_are_dated_the_way_the_cinema_dates_them(session, adapter):
+    """A 00:30 Prague show is the *previous* day in UTC. Comparing the UTC date against
+    the local-dated days the poller fetched would make it look unpolled forever."""
+    from tg.core.normalize import NormScreening
+
+    late = NormScreening(
+        source="cinemacity_cz",
+        external_id="999999",
+        event_external_id="7268s2r",
+        venue_external_id="1052",
+        starts_at=datetime(2026, 8, 9, 22, 30, tzinfo=UTC),  # 00:30 on the 10th, Prague
+        auditorium="IMAX VOLVO",
+    )
+    sync_screenings(
+        session,
+        "cinemacity_cz",
+        [late],
+        covered_dates={date(2026, 8, 10)},
+        now=datetime(2026, 8, 1, tzinfo=UTC),
+    )
+
+    changes = sync_screenings(
+        session,
+        "cinemacity_cz",
+        [],
+        covered_dates={date(2026, 8, 10)},
+        now=datetime(2026, 8, 1, tzinfo=UTC),
+    )
+    assert {c.change_type for c in changes} == {ChangeType.SCREENING_REMOVED}

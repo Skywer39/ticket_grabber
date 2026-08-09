@@ -118,11 +118,39 @@ watches:
       time_between: ["16:00", "23:00"]
     seats: { profile: flora_imax, min_contiguous: 2 }
     trigger:
-      on: [NEW_SCREENING, SEAT_FREED, AVAILABILITY_RISE]
-      availability_rise_min: 0.005     # ignore jitter
+      on: [NEW_SCREENING, AVAILABILITY_RISE]
+      min_seats_above_floor: 4         # in seats, measured from the resting level
+      max_availability: 0.10           # only while the house is still sold out
     notify: [discord]
     cooldown: 10m
 ```
+
+## Counting in seats, not percentages
+
+The site publishes a ratio and never a seat count, so the obvious alert reads "2.1% of
+seats free" — true, and useless. Two things fix that.
+
+**The hall's size is recoverable.** Every ratio the site has ever published for one
+auditorium is a multiple of `1 / capacity`, so the smallest denominator consistent with
+all of them *is* the capacity. Flora's IMAX comes out at 385 seats, and "2.1% free"
+becomes "8 of 385 seats free (+2)".
+
+**A sold-out house does not rest at zero.** 47 of 84 tracked 70mm screenings sat at
+*exactly* six free seats — a floor that identical across dozens of independent
+screenings is structural, not stock: wheelchair spaces and their companion seats, which
+the ratio counts and the seat picker will not sell you. So `min_seats_above_floor`
+measures the rise from each screening's own observed minimum rather than from the
+previous reading, and the permanently-unsold seats stop counting as availability.
+
+Why it matters: five days of the old fractional threshold produced 63 alerts, every one
+of them a two-seat move on a house resting at six — a cart timing out, the seats
+returning to the pool, and someone else taking them within the half hour. All true, none
+actionable. Replayed against the same recorded history, the rule above fires 20 times,
+and every one is a block of four to six seats genuinely coming back.
+
+`availability_rise_min` still exists and still works; it is the fallback for a hall whose
+capacity cannot be estimated yet. Prefer the seats form — a fraction means a different
+number of seats in every auditorium.
 
 The rule that would have prevented the original miss is the boring one: alert on
 `NEW_SCREENING` for anything appearing in the hall you care about, regardless of film.
@@ -141,6 +169,22 @@ attribute, and a format filter drops them silently.
     notify: [discord]
     cooldown: 1h
 ```
+
+And subscribe something to `NEW_DATE`, which is the calendar probe — one request, and the
+first place a newly published week shows up, before any showtime detail is fetched:
+
+```yaml
+  - name: "New dates published at Flora"
+    source: cinemacity_cz
+    trigger: { on: [NEW_DATE] }
+    notify: [discord]
+    cooldown: 6h
+```
+
+Deliberately unfiltered. A new date carries no film, hall or format, so `match` criteria
+naming any of those cannot narrow it — config load warns rather than silently ignoring
+them. Filter with a `NEW_SCREENING` watch; use this one as the heads-up that the next
+week exists at all.
 
 Check it before trusting it:
 
@@ -168,7 +212,13 @@ exactly like a quiet week — `tg adapter heal` says so.
 **Seat-level detail may not work.** Tier 1 tells you *how many* seats are free, from
 a fast public endpoint, reliably. Telling you *which* seats requires the booking flow,
 and that host is behind Cloudflare bot management. In testing it returned a hard block
-page to an automated session. So:
+page to an automated session.
+
+The practical consequence is worth stating plainly: with `seatmap` off, a watch's
+`seats` block — the row range, the seat range, `min_contiguous` — **is not applied**.
+Nothing filters on seat position, so "four seats came back" may still mean four singles
+scattered across the front row. Tier 1 is honest about quantity and silent about
+quality. So:
 
 - `seatmap` is **off by default**. If enabled and blocked, it disables itself, says
   so, and ratio-based alerting continues unaffected.
@@ -211,7 +261,7 @@ conditional GETs and backoff regardless.
 
 ```bash
 pip install -e '.[dev]'
-pytest          # 138 tests, run against payloads captured from the live API
+pytest          # 169 tests, run against payloads captured from the live API
 ruff check src tests
 ```
 

@@ -94,8 +94,22 @@ watches:
       profile: flora_imax
       min_contiguous: 2
     trigger:
-      on: [NEW_SCREENING, SEAT_FREED, AVAILABILITY_RISE]
-      availability_rise_min: 0.005
+      # SEAT_FREED is deliberately absent: it is a tier-2 change type and cannot fire
+      # while `seatmap.enabled` is false. Listing it only implies a filter that is not
+      # running — the same is true of `seats` above, which tier 1 cannot apply either.
+      on: [NEW_SCREENING, AVAILABILITY_RISE]
+      # Measured in seats above this screening's own resting level, not in ratio points.
+      #
+      # Flora's IMAX is 385 seats and sits at exactly 6 free on most sold-out dates —
+      # a structural floor (wheelchair spaces and their companions), not stock you can
+      # buy. Against that floor the constant background movement is ±2 seats as carts
+      # are held and time out, which produced ~12 alerts a day that were all gone by
+      # the time anyone tapped the link. Four seats above the floor means a real block
+      # came back, most likely a cancelled group booking.
+      min_seats_above_floor: 4
+      # And only while the house is still essentially sold out; once a screening has
+      # plenty free, seats coming and going is not news.
+      max_availability: 0.10
     notify: [discord]
     cooldown: 10m
     assist: off
@@ -116,3 +130,19 @@ watches:
       on: [NEW_SCREENING]
     notify: [discord]
     cooldown: 1h
+
+  # The cheapest and earliest signal there is: one request says which dates have
+  # anything on sale, and a date appearing there means a program was published —
+  # before any showtime detail has been fetched.
+  #
+  # Nothing was subscribed to it, so the whole first tier of the design was reporting
+  # into a log nobody reads. Deliberately unfiltered: a new date carries no film, hall
+  # or format, so `auditorium_regex` here would not narrow it, it would just be
+  # ignored (config load warns if you add one). The IMAX watch above is what filters;
+  # this is the heads-up that the next week exists at all.
+  - name: "New dates published at Flora"
+    source: cinemacity_cz
+    trigger:
+      on: [NEW_DATE]
+    notify: [discord]
+    cooldown: 6h

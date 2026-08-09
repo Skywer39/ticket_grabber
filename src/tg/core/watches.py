@@ -9,11 +9,12 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from sqlmodel import Session, col, select
 
 from tg.config import WEEKDAYS, AppConfig, SeatPreference, WatchConfig, WatchMatch
+from tg.core.capacity import estimate_capacity, seats_from_ratio
 from tg.core.diff import Change, ChangeType
 from tg.core.normalize import Seat, parse_row_index, parse_seat_index
 from tg.core.timeutil import DEFAULT_TZ, format_local, from_db, to_local
@@ -147,11 +148,63 @@ def screening_matches(
     return True
 
 
-def _threshold_ok(watch: WatchConfig, change: Change) -> bool:
+def date_matches(match: WatchMatch, day: date | None) -> bool:
+    """Match the criteria a bare calendar date can actually answer.
+
+    ``NEW_DATE`` carries a date and nothing else — no film, no hall, no format — so the
+    screening-level criteria are *unanswerable* rather than false. Evaluating them would
+    make every ``NEW_DATE`` watch permanently silent; skipping the match step entirely,
+    as this used to, made a watch that named one auditorium fire for the whole cinema.
+    Only the date criteria are applied, and config load warns about the rest.
+    """
+    if day is None:
+        return False
+    if match.date_from and day < match.date_from:
+        return False
+    if match.date_to and day > match.date_to:
+        return False
+    if match.weekdays and day.weekday() not in {WEEKDAYS[d] for d in match.weekdays}:
+        return False
+    return True
+
+
+def hall_capacity(
+    session: Session, source: str, venue_key: str | None, auditorium: str | None
+) -> int | None:
+    """Seat count of one auditorium, recovered from the ratios seen across its screenings.
+
+    Pooling the whole hall rather than one screening is what makes this reliable — see
+    :mod:`tg.core.capacity`.
+    """
+    if not venue_key or not auditorium:
+        return None
+    ratios = session.exec(
+        select(Screening.availability_ratio).where(
+            Screening.source == source,
+            Screening.venue_key == venue_key,
+            Screening.auditorium == auditorium,
+            col(Screening.availability_ratio).is_not(None),
+        )
+    ).all()
+    return estimate_capacity(ratios)
+
+
+def _threshold_ok(watch: WatchConfig, change: Change, capacity: int | None) -> bool:
     """Availability noise filter. The ratio jitters constantly as carts are held."""
     delta = change.delta
     if change.change_type is ChangeType.AVAILABILITY_RISE:
-        if delta is None or delta < watch.trigger.availability_rise_min:
+        if delta is None:
+            return False
+        floor = change.new.get("availability_floor")
+        seats_min = watch.trigger.min_seats_above_floor
+        if seats_min is not None and capacity and floor is not None:
+            # How far above its resting level this screening actually moved, in seats.
+            # A near-sold-out house holds a few permanently unsold seats, so measuring
+            # against the previous reading counts stock that was never for sale.
+            above = round((change.new["availability_ratio"] - floor) * capacity)
+            if above < seats_min:
+                return False
+        elif delta < watch.trigger.availability_rise_min:
             return False
     elif change.change_type is ChangeType.AVAILABILITY_DROP:
         if delta is None or abs(delta) < watch.trigger.availability_drop_min:
@@ -184,6 +237,8 @@ class _Resolved:
     auditorium: str | None
     venue_name: str | None
     venue_external_id: str | None
+    #: Needed to scope a capacity estimate to one hall at one venue.
+    venue_key: str | None
     starts_at: datetime | None
     formats: list[str]
     booking_url: str | None
@@ -212,6 +267,7 @@ def _resolve(session: Session, change: Change) -> _Resolved:
             auditorium=ns.auditorium,
             venue_name=venue.name if venue else ns.venue_name,
             venue_external_id=ns.venue_external_id,
+            venue_key=ns.venue_key,
             starts_at=ns.starts_at,
             formats=sorted(str(f) for f in ns.formats),
             booking_url=ns.booking_url,
@@ -232,6 +288,7 @@ def _resolve(session: Session, change: Change) -> _Resolved:
                 auditorium=row.auditorium,
                 venue_name=venue.name if venue else None,
                 venue_external_id=venue.external_id if venue else None,
+                venue_key=row.venue_key,
                 starts_at=from_db(row.starts_at),
                 formats=list(row.formats or []),
                 booking_url=row.booking_url,
@@ -248,13 +305,14 @@ def _resolve(session: Session, change: Change) -> _Resolved:
             auditorium=None,
             venue_name=None,
             venue_external_id=None,
+            venue_key=None,
             starts_at=None,
             formats=sorted(str(f) for f in change.event.formats),
             booking_url=change.event.url,
             availability_ratio=None,
         )
 
-    return _Resolved(None, None, None, None, None, [], None, None)
+    return _Resolved(None, None, None, None, None, None, [], None, None)
 
 
 def evaluate(
@@ -293,36 +351,70 @@ def _candidate_alerts(
     dry_run: bool,
 ) -> list[Alert]:
     alerts: list[Alert] = []
+    #: One capacity estimate per hall per cycle — the query pools every screening in it.
+    capacities: dict[tuple[str, str | None, str | None], int | None] = {}
+    #: Keys already spoken for in *this* cycle. The cooldown check below reads the
+    #: database, and candidates are not written until the whole loop has run, so
+    #: without this two changes on one screening each produce their own message.
+    claimed: set[tuple[str, str]] = set()
+
     for change in changes:
+        ctx: _Resolved | None = None
         for watch in config.watches:
             if not watch.enabled or watch.source != change.source:
                 continue
             if str(change.change_type) not in watch.trigger.events:
                 continue
-            if not _threshold_ok(watch, change):
-                continue
 
             tz_name = config.sources[watch.source].options.get("timezone", DEFAULT_TZ)
-            ctx = _resolve(session, change)
+            if ctx is None:
+                ctx = _resolve(session, change)
 
-            if change.change_type in SCREENING_CHANGES and not screening_matches(
-                watch.match,
-                title=ctx.title,
-                auditorium=ctx.auditorium,
-                venue_external_id=ctx.venue_external_id,
-                starts_at=ctx.starts_at,
-                formats=ctx.formats,
-                tz_name=tz_name,
-            ):
+            hall = (change.source, ctx.venue_key, ctx.auditorium)
+            if hall not in capacities:
+                capacities[hall] = hall_capacity(
+                    session, change.source, ctx.venue_key, ctx.auditorium
+                )
+            capacity = capacities[hall]
+
+            if not _threshold_ok(watch, change, capacity):
                 continue
 
+            if change.change_type in SCREENING_CHANGES:
+                if not screening_matches(
+                    watch.match,
+                    title=ctx.title,
+                    auditorium=ctx.auditorium,
+                    venue_external_id=ctx.venue_external_id,
+                    starts_at=ctx.starts_at,
+                    formats=ctx.formats,
+                    tz_name=tz_name,
+                ):
+                    continue
+            elif change.change_type is ChangeType.NEW_DATE:
+                if not date_matches(watch.match, _parse_date(change.new.get("date"))):
+                    continue
+
             dedupe_key = change.screening_key or f"{change.source}:{change.new.get('date', '-')}"
+            if (watch.name, dedupe_key) in claimed:
+                continue
             if not dry_run and _in_cooldown(session, watch, dedupe_key, now):
                 continue
 
-            alerts.append(_build_alert(watch, change, ctx, dedupe_key, tz_name, now))
+            claimed.add((watch.name, dedupe_key))
+            alerts.append(_build_alert(watch, change, ctx, dedupe_key, tz_name, now, capacity))
 
     return alerts
+
+
+def _parse_date(raw: str | None) -> date | None:
+    if not raw:
+        return None
+    try:
+        return date.fromisoformat(raw)
+    except ValueError:
+        log.warning("unparseable date %r on a NEW_DATE change", raw)
+        return None
 
 
 def _rollup(config: AppConfig, alerts: list[Alert], now: datetime) -> list[Alert]:
@@ -375,6 +467,7 @@ def _build_alert(
     dedupe_key: str,
     tz_name: str,
     now: datetime,
+    capacity: int | None = None,
 ) -> Alert:
     headline = {
         ChangeType.NEW_SCREENING: "New screening on sale",
@@ -405,11 +498,31 @@ def _build_alert(
     if change.change_type is ChangeType.NEW_DATE:
         lines.append(f"Date {change.new.get('date')} now has screenings on sale.")
 
-    ratio = ctx.availability_ratio
-    if ratio is not None:
+    # Say it in seats whenever the hall's size is known. "2.1% of seats free" and
+    # "+0.5 pp" are true and useless: in a 385-seat house that is eight seats and a
+    # move of two, and only the seat counts tell you whether it is worth getting up for.
+    # The state *after* the change. Taking it from the change rather than from the
+    # resolved row keeps the count, the delta and the floor telling one consistent
+    # story — they all come from the same reading.
+    ratio = change.new.get("availability_ratio", ctx.availability_ratio)
+    delta = change.delta
+    seats = seats_from_ratio(ratio, capacity)
+    if seats is not None:
+        moved = seats_from_ratio(delta, capacity)
+        line = f"{seats} of {capacity} seats free"
+        if moved:
+            line += f" ({moved:+d})"
+        lines.append(line)
+        floor_seats = seats_from_ratio(change.new.get("availability_floor"), capacity)
+        if floor_seats is not None and change.change_type is ChangeType.AVAILABILITY_RISE:
+            lines.append(
+                f"this screening rests at {floor_seats} free, so {seats - floor_seats} "
+                "genuinely came back"
+            )
+    elif ratio is not None:
         lines.append(f"{ratio * 100:.1f}% of seats free")
-    if (delta := change.delta) is not None:
-        lines.append(f"change {delta * 100:+.1f} pp")
+        if delta is not None:
+            lines.append(f"change {delta * 100:+.1f} pp")
     if freed := change.new.get("freed_seats"):
         preview = ", ".join(s.split("|")[-2] + "-" + s.split("|")[-1] for s in freed[:8])
         lines.append(f"freed: {preview}{' …' if len(freed) > 8 else ''}")

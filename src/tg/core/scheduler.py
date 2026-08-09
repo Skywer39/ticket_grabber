@@ -189,6 +189,13 @@ class SourceRunner:
             events, screenings = await self.adapter.screenings(today, horizon, dates=targets)
         report.screenings_seen = len(screenings)
 
+        # A date only counts as looked-at if it actually came back with something. An
+        # empty or truncated response is indistinguishable from "everything that day was
+        # cancelled", and treating it as coverage marked whole days as removed and then
+        # un-removed them on the next poll.
+        answered = {to_local(s.starts_at, self.tz_name).date() for s in screenings}
+        covered = set(targets) & answered
+
         with session_scope() as session:
             changes = list(calendar_changes)
             changes.extend(sync_events(session, events))
@@ -197,8 +204,9 @@ class SourceRunner:
                     session,
                     self.key,
                     screenings,
-                    covered_dates=set(targets),
-                    detect_removals=bool(targets),
+                    covered_dates=covered,
+                    detect_removals=bool(covered),
+                    tz_name=self.tz_name,
                 )
             )
             report.changes = changes
