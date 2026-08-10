@@ -42,6 +42,18 @@ on:
     # Costs 4x the workflow-failure emails while Actions is down, which is the price of
     # the shorter hole. Drop to */30 if that grates.
     - cron: "*/15 * * * *"
+
+  # Deploys. Without this a merge waits for the running session to time out, which is
+  # up to 5h40m — and that is not theoretical: two fixes sat undeployed for a day while
+  # a session started before them kept alerting on the old rules, and every queued run
+  # was evicted before it could start (see `concurrency` below).
+  #
+  # Scoped to the default branch on purpose. The "Save state" step below pushes to the
+  # `state` branch at the end of every session, so an unscoped trigger would make each
+  # session's last act start another one, forever.
+  push:
+    branches: [claude/ticket-monitoring-system-z3zk34]
+
   workflow_dispatch:
     inputs:
       reset_state:
@@ -54,9 +66,18 @@ on:
         default: false
 
 # Runs share one SQLite file; overlapping them would corrupt it.
+#
+# A scheduled run must never cancel the session in progress — that is the whole abutting
+# design, where a dispatch lands mid-session and starts the moment the current one ends.
+#
+# A push must, because it is a deploy. Note what the group does *not* do: it is not a
+# queue. GitHub keeps one running job and at most one pending job, and a newly queued run
+# evicts the pending one rather than lining up behind it. So without pre-emption a merge
+# is not merely delayed, it is repeatedly thrown away — measured on this repo, three
+# consecutive new-code runs were cancelled while a stale session held the slot.
 concurrency:
   group: ticket-watch
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 permissions:
   contents: write
@@ -112,7 +133,15 @@ jobs:
           # Put channel wiring on the run summary page. A 5h40m session's log is not
           # somewhere anyone scrolls, and a silently unwired channel is the failure
           # most likely to go unnoticed.
+          #
+          # The commit is here for the same reason. A session outlives several merges, so
+          # "is my change live yet?" is a real question, and answering it used to mean
+          # reading run metadata in the Actions API.
           {
+            echo "### Session"
+            echo "Polling \`${GITHUB_SHA:0:7}\` — started $(date -u '+%F %T UTC'), \
+            triggered by \`${GITHUB_EVENT_NAME}\`."
+            echo
             echo "### Channels"
             echo '```'
             tg status --limit 1 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | head -4

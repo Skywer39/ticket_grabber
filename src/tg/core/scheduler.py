@@ -23,6 +23,7 @@ from datetime import date, datetime, timedelta
 
 from sqlmodel import Session, select
 
+from tg import running_revision
 from tg.adapters.base_http import PoliteClient
 from tg.assist.checkout import CheckoutAssistant
 from tg.config import WEEKDAYS, AppConfig, HotWindow
@@ -539,6 +540,9 @@ class Engine:
 
         hours, minutes = divmod(int(gap.total_seconds()) // 60, 60)
         tz_name = self.runners[0].tz_name if self.runners else None
+        # A gap is usually a session changeover, which is also when the running code can
+        # change. Naming it here means the first message after a deploy says what landed.
+        revision = f"\nNow polling {rev}." if (rev := running_revision()) else ""
         alert = Alert(
             watch_name="monitor",
             screening_key="monitor:coverage",
@@ -547,7 +551,7 @@ class Engine:
             body=(
                 f"Nothing polled since {format_local(from_db(last), tz_name)}.\n"
                 "Anything published during the gap is still caught by the next poll, "
-                "just that much later."
+                f"just that much later.{revision}"
             ),
             channels=list(self.dispatcher.notifiers),
         )

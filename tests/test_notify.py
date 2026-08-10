@@ -210,3 +210,50 @@ def test_redact_ignores_short_values_that_would_mangle_text():
 
 def test_redact_leaves_clean_text_untouched():
     assert redact("discord: not configured") == "discord: not configured"
+
+
+# --------------------------------------------------------- which code sent it
+#
+# A polling session is sized in hours and outlives several merges. Two fixes once sat
+# undeployed for a day behind a session that had started before them, and every alert in
+# the meantime looked exactly like the ones the fixes were meant to change — so there was
+# no way to tell "the fix is wrong" from "the fix is not running yet".
+
+
+class _Capture:
+    """Stands in for the Discord webhook and keeps the payload."""
+
+    def __init__(self) -> None:
+        self.payload: dict | None = None
+
+    async def post(self, url, json):  # noqa: A002 — matches httpx's signature
+        self.payload = json
+        return httpx.Response(204, request=httpx.Request("POST", url))
+
+
+async def _footer(monkeypatch, **env) -> str:
+    from tg.notify.discord import DiscordNotifier
+
+    for key in ("TG_REVISION", "GITHUB_SHA"):
+        monkeypatch.delenv(key, raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+
+    capture = _Capture()
+    await DiscordNotifier("https://example.test/hook").send(_alert(), capture)  # type: ignore[arg-type]
+    assert capture.payload is not None
+    return capture.payload["embeds"][0]["footer"]["text"]
+
+
+async def test_alerts_are_stamped_with_the_running_commit(monkeypatch):
+    text = await _footer(monkeypatch, GITHUB_SHA="1bb66cf781ab71ca07c0256b68f4efca8066a752")
+    assert text == "watch: w · 1bb66cf"
+
+
+async def test_an_explicit_revision_wins_over_the_ci_one(monkeypatch):
+    text = await _footer(monkeypatch, GITHUB_SHA="aaaaaaa0000", TG_REVISION="deadbee1234")
+    assert text == "watch: w · deadbee"
+
+
+async def test_no_revision_says_nothing_rather_than_guessing(monkeypatch):
+    assert await _footer(monkeypatch) == "watch: w"

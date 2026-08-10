@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import httpx
 
+from tg import running_revision
 from tg.models import Alert
 from tg.notify.base import Notifier
 
@@ -26,11 +27,17 @@ class DiscordNotifier(Notifier):
         self.webhook_url = webhook_url
 
     async def send(self, alert: Alert, client: httpx.AsyncClient) -> None:
+        # The revision rides in the footer because a session outlives several merges, and
+        # an alert that looks wrong is ambiguous until you know which code sent it.
+        footer = f"watch: {alert.watch_name}"
+        if rev := running_revision():
+            footer += f" · {rev}"
+
         embed: dict = {
             "title": alert.title[:256],
             "description": alert.body[:4096],
             "color": _COLOURS.get(alert.change_type, 0x95A5A6),
-            "footer": {"text": f"watch: {alert.watch_name}"},
+            "footer": {"text": footer},
         }
         if alert.url:
             embed["url"] = alert.url

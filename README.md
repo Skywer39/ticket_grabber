@@ -86,6 +86,15 @@ starts the moment the current one ends — so sessions abut instead of leaving h
 cron is no longer the cadence; it is what keeps the chain unbroken. Inside a session the
 cadence is the poller's own: 45s in the hot window, 15 min overnight.
 
+**A merge pre-empts the running session.** Without that a deploy waits for the current
+session to time out, and the concurrency group is not a queue: GitHub keeps one running
+job and *at most one* pending job, so a newly queued run evicts the waiting one instead of
+lining up behind it. Measured here, three consecutive new-code runs were cancelled while a
+stale session held the slot, and the fix they carried sat undeployed for a day. So
+`push` to the default branch cancels in progress; `schedule` never does, which is what
+keeps sessions abutting. Every alert carries the running commit in its footer, because a
+session outlives several merges and "is my change live yet?" needs an answer.
+
 Three caveats, in order of how likely they are to bite:
 
 - Needs a **public repository**. Private repos meter Actions minutes (2,000/month free),
@@ -286,7 +295,7 @@ conditional GETs and backoff regardless.
 
 ```bash
 pip install -e '.[dev]'
-pytest          # 175 tests, run against payloads captured from the live API
+pytest          # 178 tests, run against payloads captured from the live API
 ruff check src tests
 ```
 
