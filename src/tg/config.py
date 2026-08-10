@@ -65,6 +65,15 @@ class PollConfig(BaseModel):
     #: still leaves polling covered, so a gap this size means nobody was watching.
     #: 0 disables.
     gap_alert_minutes: int = Field(90, ge=0)
+    #: Wait this long and look again before alerting that seats freed up. 0 disables.
+    #:
+    #: ``availabilityRatio`` excludes seats sitting in somebody's open checkout, so on a
+    #: near-sold-out house most of its movement is a cart expiring and being re-taken
+    #: rather than a genuine cancellation. Those blips revert in minutes — one was
+    #: measured going 5 -> 7 -> 5 seats inside four — and alerting on them sends you to
+    #: a full seat map. A block that really came back lasts tens of minutes, so it
+    #: survives the second look and this costs it only the delay.
+    confirm_seconds: int = Field(90, ge=0)
 
 
 class HotWindow(BaseModel):

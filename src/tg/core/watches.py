@@ -343,6 +343,30 @@ def evaluate(
     return deliverable
 
 
+def candidate_screening_keys(
+    session: Session,
+    config: AppConfig,
+    changes: list[Change],
+    *,
+    now: datetime | None = None,
+) -> set[str]:
+    """Screenings that would alert if the cycle ended right now.
+
+    Used by the confirmation pass to spend a second request only where one could change
+    the outcome. Deliberately reuses :func:`_candidate_alerts` rather than restating the
+    matching, threshold and capacity rules, and runs it as a dry run so nothing is
+    written and no cooldown is consumed by merely asking.
+
+    Digesting is skipped on purpose: :func:`_rollup` replaces a burst with a single row
+    whose key names the digest, which would hide exactly the screenings being asked about.
+    """
+    return {
+        a.screening_key
+        for a in _candidate_alerts(session, config, changes, now or utcnow(), True)
+        if a.screening_key
+    }
+
+
 def _candidate_alerts(
     session: Session,
     config: AppConfig,
@@ -519,6 +543,12 @@ def _build_alert(
                 f"this screening rests at {floor_seats} free, so {seats - floor_seats} "
                 "genuinely came back"
             )
+
+    # Worth saying out loud: the count above is a second reading, not the first. Most
+    # movement on a sold-out house is a checkout hold expiring and being re-taken within
+    # minutes, and this is what separates that from a real return.
+    if (held := change.new.get("confirmed_after_seconds")) is not None:
+        lines.append(f"still free {held}s later")
     elif ratio is not None:
         lines.append(f"{ratio * 100:.1f}% of seats free")
         if delta is not None:

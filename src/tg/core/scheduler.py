@@ -39,7 +39,7 @@ from tg.core.diff import (
 from tg.core.normalize import NormScreening
 from tg.core.ratelimit import jittered
 from tg.core.timeutil import DEFAULT_TZ, format_local, from_db, to_local, utcnow_aware
-from tg.core.watches import evaluate, screening_matches
+from tg.core.watches import candidate_screening_keys, evaluate, screening_matches
 from tg.db import session_scope
 from tg.models import Alert, PollState, Screening, utcnow
 from tg.notify.base import Dispatcher
@@ -219,6 +219,10 @@ class SourceRunner:
             report.changes.extend(seat_changes)
             report.seatmaps_read = len({c.screening_key for c in seat_changes})
 
+        # --- confirmation: is it still there a moment later? -----------------
+        if not cold_start and self.config.poll.confirm_seconds:
+            report.changes = await self._confirm_rises(report.changes)
+
         # --- alerts ---------------------------------------------------------
         if cold_start:
             log.info(
@@ -241,6 +245,65 @@ class SourceRunner:
 
         if self.assistant and report.alerts:
             await self._maybe_assist(report.alerts)
+
+    async def _confirm_rises(self, changes: list[Change]) -> list[Change]:
+        """Look again before telling anyone that seats freed up.
+
+        ``availabilityRatio`` counts seats that are not in somebody's open checkout, so
+        on a house that is 98% sold most of its movement is a cart timing out and being
+        re-taken rather than a real cancellation. Measured on one screening: 5 seats went
+        to 7 and back to 5 inside four minutes, and the alert in between sent someone to
+        a full seat map. A block that genuinely came back lasts tens of minutes and so
+        survives this second look.
+
+        The fresh reading *replaces* the one in the change rather than filtering it here.
+        That leaves the ordinary threshold to make the decision — a full revert fails it
+        by itself, and a partial one is judged on what is actually left — and it means
+        the alert quotes the confirmed number instead of the one that has already gone.
+        """
+        wanted = {
+            c.screening_key
+            for c in changes
+            if c.change_type is ChangeType.AVAILABILITY_RISE and c.screening_key
+        }
+        if not wanted:
+            return changes
+
+        with session_scope() as session:
+            wanted &= candidate_screening_keys(session, self.config, changes)
+        if not wanted:
+            return changes  # nothing here would have alerted anyway
+
+        pending = [c for c in changes if c.screening_key in wanted and c.screening]
+        days = sorted({to_local(c.screening.starts_at, self.tz_name).date() for c in pending})
+        if not days:
+            return changes
+
+        delay = self.config.poll.confirm_seconds
+        log.info("confirming %d rise(s) in %ds before alerting", len(pending), delay)
+        await asyncio.sleep(delay)
+
+        try:
+            _, fresh = await self.adapter.screenings(days[0], days[-1], dates=days)
+        except Exception as exc:  # noqa: BLE001 — a failed re-read must not lose the cycle
+            log.warning("confirmation re-read failed, alerting on the first reading: %s", exc)
+            return changes
+
+        latest = {s.key: s.availability_ratio for s in fresh}
+        out: list[Change] = []
+        for change in changes:
+            if change.screening_key not in wanted:
+                out.append(change)
+                continue
+            ratio = latest.get(change.screening_key)
+            if ratio is None:
+                # Gone from the listing entirely between the two reads. Nothing to say.
+                log.info("%s vanished during confirmation", change.screening_key)
+                continue
+            change.new["availability_ratio"] = ratio
+            change.new["confirmed_after_seconds"] = delay
+            out.append(change)
+        return out
 
     async def _maybe_assist(self, alerts: list[Alert]) -> None:
         """Open checkout for alerts belonging to a watch that armed it.

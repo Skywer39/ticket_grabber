@@ -152,6 +152,31 @@ and every one is a block of four to six seats genuinely coming back.
 capacity cannot be estimated yet. Prefer the seats form — a fraction means a different
 number of seats in every auditorium.
 
+### Looking twice
+
+Size is only half of it. `availabilityRatio` counts seats that are **not** sitting in
+somebody's open checkout, so on a house this full most of its movement is a cart timing
+out and being re-taken rather than anyone cancelling. Measured on one IMAX screening:
+
+```
+08:02:12  5 -> 7 seats free   alert sent
+08:06:34  5 seats free        four minutes later
+```
+
+Same screening, same shape twice before: 5→6 back in 35 minutes, 5→7 back in 41. Those
+seats were never really on sale — you were watching the gap between one checkout expiring
+and the next starting.
+
+So before alerting, the poller waits `poll.confirm_seconds` (default 90) and reads the
+screening again, and the *confirmed* number replaces the first one. The ordinary
+threshold then decides: a full revert fails it by itself, a partial revert is judged on
+what is actually left, and the message quotes what is still there rather than what has
+already gone — "still free 90s later".
+
+It costs a real find ninety seconds. Against blocks that survive 24–53 minutes that is
+cheap, and against a four-minute blip it is the whole difference. Set it to `0` to alert
+on the first reading.
+
 The rule that would have prevented the original miss is the boring one: alert on
 `NEW_SCREENING` for anything appearing in the hall you care about, regardless of film.
 
@@ -261,7 +286,7 @@ conditional GETs and backoff regardless.
 
 ```bash
 pip install -e '.[dev]'
-pytest          # 169 tests, run against payloads captured from the live API
+pytest          # 175 tests, run against payloads captured from the live API
 ruff check src tests
 ```
 
