@@ -149,14 +149,17 @@ all of them *is* the capacity. Flora's IMAX comes out at 385 seats, and "2.1% fr
 becomes "8 of 385 seats free (+2)".
 
 **A sold-out house does not rest at zero.** Each screening settles at its own floor of
-seats that simply never sell — measured per screening they are 2, 3, 4, 5, 6 and 29, with
-six the most common among similarly sold-out shows. Measuring a rise from the previous
-reading therefore counts stock that has been sitting there for days. `min_seats_above_floor`
-measures it from each screening's own observed minimum instead.
+seats that never sell. Measuring a rise from the previous reading therefore counts stock
+that has been sitting there for days; `min_seats_above_floor` measures it from each
+screening's own observed minimum instead.
 
-Note what this does *not* claim: why those seats never sell. Tier 1 sees a count and never
-an identity, so whether they are restricted-view, wheelchair spaces or simply unwanted is
-not something this can tell you — see the limits below.
+At Flora that floor is the wheelchair block. **56 of 86 tracked IMAX screenings rest at
+exactly six free seats, and a screenshot of the picker shows exactly six wheelchair
+positions in row 12** — three at each end, the only seats drawn differently in the room.
+Screenings resting at 2–5 are ones where some of those positions did sell.
+
+That explains the floor. It does *not* explain the harder problem below — a screening
+reporting four seats **above** that floor while the picker offered nothing at all.
 
 Why it matters: five days of the old fractional threshold produced 63 alerts, every one
 of them a two-seat move on a house resting at six — a cart timing out, the seats
@@ -250,6 +253,40 @@ exactly like a quiet week — `tg adapter heal` says so.
 
 ## Limits, stated plainly
 
+**Does the ratio count seats you can actually buy?** Unresolved, and it matters more than
+any threshold. One screening reported ten free — four above its floor, confirmed still
+there ninety seconds later — while the seat picker offered nothing at all. If
+`availabilityRatio` counts stock the booking flow will not sell, every seat count here is
+overstated and no filter fixes it.
+
+`tg seatmap probe <key> --raw` reads both sources at the same moment and says which to
+believe:
+
+```
+capacity: inferred 385, picker shows 385 — matches
+
+tier 1 says 2.60% free ≈ 10 of 385 seats
+the picker offers 0 of 385 seats
+tier 1 claims 10 seats the picker will not sell.
+```
+
+It needs a browser, so run it on your own machine, not in CI:
+
+```bash
+pip install -e '.[browser]' && playwright install chromium
+cp config.example.yaml config.local.yaml    # then set seatmap.enabled: true
+tg run --once -c config.local.yaml          # seed, so screenings exist to probe
+tg seatmap probe cinemacity_cz:224128 --raw -c config.local.yaml
+```
+
+A separate file rather than an edit to `config.example.yaml` on purpose: the workflow
+copies the example to `config.yaml`, so enabling the browser there points a CI runner at
+a host that blocks it. `config.local.yaml` is gitignored.
+
+`--raw` distinguishes the three ways this fails, which otherwise look identical: the page
+was never reached, the page loaded but the selectors matched nothing, or the seats parsed
+and genuinely are not for sale.
+
 **Seat-level detail may not work.** Tier 1 tells you *how many* seats are free, from
 a fast public endpoint, reliably. Telling you *which* seats requires the booking flow,
 and that host is behind Cloudflare bot management. In testing it returned a hard block
@@ -302,7 +339,7 @@ conditional GETs and backoff regardless.
 
 ```bash
 pip install -e '.[dev]'
-pytest          # 178 tests, run against payloads captured from the live API
+pytest          # 183 tests, run against payloads captured from the live API
 ruff check src tests
 ```
 

@@ -80,12 +80,12 @@ class Screening(SQLModel, table=True):
     availability_ratio: float | None = None
     #: Lowest ratio ever observed for this screening — its "sold out" resting level.
     #:
-    #: Near-sold-out halls do not settle at zero free seats. Praha Flora's IMAX sits at
-    #: exactly 6 free across dozens of independent screenings, which is a structural
-    #: floor (wheelchair spaces and their companion seats) rather than stock anyone can
-    #: buy. Alerting on the ratio alone therefore fires on seats that were never really
-    #: for sale; measuring the rise against this floor is what makes the number mean
-    #: something.
+    #: Near-sold-out halls do not settle at zero free seats. 56 of 86 tracked screenings
+    #: in Praha Flora's IMAX rest at exactly 6 free, and the seat picker shows exactly 6
+    #: wheelchair positions in the back row — so the floor is a structural block rather
+    #: than stock anyone can buy. Alerting on the ratio alone therefore fires on seats
+    #: that were never really for sale; measuring the rise against this floor is what
+    #: makes the number mean something.
     availability_floor: float | None = None
     sales_blocked: bool = False
     formats: list[str] = Field(default_factory=list, sa_column=Column(JSON))

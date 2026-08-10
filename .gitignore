@@ -8,6 +8,10 @@ venv/
 
 # Runtime state — never commit
 config.yaml
+# The local override that turns on tier 2. Deliberately a separate file rather than an
+# edit to config.example.yaml: the workflow copies the example to config.yaml, so
+# enabling the browser there would point a CI runner at a host that blocks it.
+config.local.yaml
 # Every .env variant, including .env.local and .env.production. The template is the
 # one exception; it holds placeholders only.
 .env*

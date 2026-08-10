@@ -6,6 +6,7 @@ import asyncio
 import datetime as dt
 import logging
 import shutil
+from collections import Counter
 from pathlib import Path
 from typing import Annotated
 
@@ -20,11 +21,12 @@ from tg.adapters.base_http import PoliteClient
 from tg.assist.checkout import CheckoutAssistant
 from tg.config import AppConfig, Secrets, load_config
 from tg.core.adapter import build_adapter, registered_adapters
+from tg.core.capacity import reconcile
 from tg.core.diff import ChangeType
 from tg.core.normalize import NormScreening
 from tg.core.scheduler import Engine, is_hot
 from tg.core.timeutil import DEFAULT_TZ, format_local, from_db, to_local, utcnow_aware
-from tg.core.watches import screening_matches
+from tg.core.watches import hall_capacity, screening_matches
 from tg.models import Alert, Event, PollState, Screening, Venue
 from tg.notify.base import Dispatcher, build_notifiers
 
@@ -458,16 +460,47 @@ def _screening_or_exit(key: str):  # type: ignore[no-untyped-def]
         return row, (ev.title if ev else "?")
 
 
+async def _live_ratio(cfg: AppConfig, source: str, row) -> float | None:  # type: ignore[no-untyped-def]
+    """This screening's availabilityRatio, fetched now rather than read from the database.
+
+    The whole point of the comparison is that the two sources are read at the same moment;
+    a stored ratio from the last poll could be minutes old and would make a real
+    disagreement look like a stale one, or the reverse.
+    """
+    source_cfg = cfg.sources[source]
+    tz = source_cfg.options.get("timezone", DEFAULT_TZ)
+    day = to_local(from_db(row.starts_at), tz).date()
+    try:
+        async with PoliteClient(cfg.http) as client:
+            adapter = build_adapter(source, source_cfg, client)
+            await adapter.setup()
+            _, screenings = await adapter.screenings(day, day, dates=[day])
+        return next((s.availability_ratio for s in screenings if s.key == row.key), None)
+    except Exception as exc:  # noqa: BLE001 — the seat map is the point; this is context
+        console.print(f"[yellow]could not re-read tier 1:[/] {exc}")
+        return None
+
+
 @seatmap_app.command("probe")
 def seatmap_probe(
     screening_key: Annotated[str, typer.Argument(help="e.g. cinemacity_cz:220716")],
+    raw: Annotated[
+        bool, typer.Option("--raw", help="Dump each seat element's classes and labels")
+    ] = False,
     config: ConfigOpt = "config.yaml",
 ) -> None:
-    """Read one screening's seat map and report exactly what was found.
+    """Read one screening's seat map and reconcile it against the availability ratio.
 
-    Use this to confirm the selectors on your own machine: the booking host blocks
-    automated sessions from datacenter addresses, so the shipped defaults were
-    derived from the site's stylesheet rather than a live seat page.
+    Two things this answers that tier 1 cannot. First, whether the shipped selectors
+    actually match a live seat page — they were derived from the site's stylesheet,
+    because the booking host blocks automated sessions from datacenter addresses, so
+    they have never been run against the real thing. `--raw` shows the unmapped
+    elements, which is what separates "sold out" from "parsed nothing".
+
+    Second, and the reason this exists: whether `availabilityRatio` counts the same
+    seats the booking flow will actually sell you. A screening reported four seats above
+    its floor while the picker offered none, and only reading both at once settles which
+    number to believe.
     """
     cfg = _load(config)
     row, title = _screening_or_exit(screening_key)
@@ -499,18 +532,94 @@ def seatmap_probe(
         finally:
             await reader.aclose()
 
+        if raw:
+            if reader.last_raw is None:
+                # Never reached the parsing step. Saying "the selector matched nothing"
+                # here would blame the wrong thing entirely.
+                console.print(
+                    "[yellow]no extraction ran[/] — the page was never reached or was "
+                    "refused, so this says nothing about the selectors. The error above "
+                    "is the real one."
+                )
+            elif not reader.last_raw:
+                console.print(
+                    "[red]the seat selector matched nothing.[/] The page loaded and "
+                    "parsing ran, so this is the selector rather than the site — set "
+                    "seatmap.selectors in config and probe again."
+                )
+            else:
+                dump = Table("classes", "row", "seat", "aria-label", title="raw seat elements")
+                for item in reader.last_raw[:40]:
+                    dump.add_row(
+                        str(item.get("cls"))[:60],
+                        str(item.get("row")),
+                        str(item.get("seat") or item.get("text")),
+                        str(item.get("label"))[:40],
+                    )
+                console.print(dump)
+
         if smap is None:
             console.print("[yellow]no seat map returned[/] — see the log for why")
             raise typer.Exit(1)
 
-        table = Table("row", "seat", "status", title=f"{len(smap.seats)} seats")
-        for s in smap.seats[:25]:
-            table.add_row(s.row_label, s.seat_label, str(s.status))
+        by_status = Counter(str(s.status) for s in smap.seats)
+        table = Table("status", "seats", title=f"{len(smap.seats)} seats on the picker")
+        for status, count in by_status.most_common():
+            table.add_row(status, str(count))
         console.print(table)
+
+        # The reconciliation. Everything above is detail; these lines are the question.
+        ratio = await _live_ratio(cfg, row.source, row)
+        seats_on_page = len(smap.seats)
+        picker_free = len(smap.available)
+        api_free, agreement = reconcile(ratio, seats_on_page, picker_free)
+
+        # The picker knows the true capacity, so this is also the first real check of the
+        # denominator every alert has been quoting, which until now was inferred from the
+        # ratios alone (see tg.core.capacity).
+        with db.session_scope() as session:
+            estimated = hall_capacity(session, row.source, row.venue_key, row.auditorium)
+        if estimated:
+            verdict = "matches" if estimated == seats_on_page else "is off by"
+            delta = "" if estimated == seats_on_page else f" {abs(estimated - seats_on_page)}"
+            console.print(
+                f"[dim]capacity: inferred {estimated}, picker shows {seats_on_page} — "
+                f"{verdict}{delta}[/]"
+            )
+
         console.print(
-            f"[green]{len(smap.available)} free of {len(smap.seats)}[/] "
-            f"({_pct(smap.availability_ratio)})"
+            f"\n[bold]tier 1[/] says {_pct(ratio)} free"
+            + (f" ≈ {api_free} of {seats_on_page} seats" if api_free is not None else "")
         )
+        console.print(f"[bold]the picker[/] offers {picker_free} of {seats_on_page} seats")
+
+        if agreement == "unknown":
+            console.print("[yellow]no tier-1 reading to compare against.[/]")
+        elif agreement == "agree":
+            console.print(
+                "[green]they agree.[/] The ratio is counting bookable seats, so the "
+                "remaining question is only whether they sit together — filter on "
+                "min_contiguous and a seat profile."
+            )
+        elif agreement == "over":
+            console.print(
+                f"[red]tier 1 claims {api_free - picker_free} seats the picker will not "
+                "sell.[/] availabilityRatio is not counting bookable stock, so every seat "
+                "count alerted on so far is overstated by roughly this much."
+            )
+            hints = Counter(
+                str(i.get("cls"))[:40] for i in (reader.last_raw or []) if i.get("cls")
+            )
+            if hints:
+                console.print("[dim]seat classes seen on the page, most common first:[/]")
+                for cls, n in hints.most_common(6):
+                    console.print(f"  [dim]{n:>4}  {cls}[/]")
+        else:
+            console.print(
+                f"[yellow]the picker offers {picker_free - api_free} more than tier 1 "
+                "reports.[/] Chances are being missed rather than invented — the ratio is "
+                "conservative, or it was read at a different moment."
+            )
 
     asyncio.run(_run())
 

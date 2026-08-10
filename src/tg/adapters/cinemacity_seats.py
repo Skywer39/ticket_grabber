@@ -86,6 +86,17 @@ class CinemaCitySeatReader:
         self._session: BrowserSession | None = None
         #: Set when the site blocks us; suppresses further attempts until it expires.
         self.blocked_until: float | None = None
+        #: Last raw extraction, kept for `tg seatmap probe --raw`.
+        #:
+        #: The selectors below were derived from a stylesheet rather than a live page, so
+        #: the first run against a real seat map is as likely to expose a parsing problem
+        #: as a data one — and a parsed count of zero looks identical to a sold-out house.
+        #: Holding the unmapped rows makes the difference visible in one run.
+        #:
+        #: ``None`` and ``[]`` mean different things and callers must not conflate them:
+        #: ``None`` is "extraction never ran" (navigation failed, or the page was blocked),
+        #: ``[]`` is "the page loaded and the selector matched nothing".
+        self.last_raw: list[dict] | None = None
 
     def is_blocked(self) -> bool:
         import time
@@ -117,6 +128,7 @@ class CinemaCitySeatReader:
         if not screening.booking_url:
             return None
 
+        self.last_raw = None  # nothing parsed yet this run; see the attribute's note
         page = await self._page()
         try:
             await page.goto(screening.booking_url, wait_until="domcontentloaded")
@@ -158,6 +170,7 @@ class CinemaCitySeatReader:
             }))""",
             self.selectors,
         )
+        self.last_raw = list(raw)
 
         seats: list[Seat] = []
         for item in raw:

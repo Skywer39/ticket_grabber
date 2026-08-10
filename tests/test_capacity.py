@@ -8,7 +8,7 @@ up against the sparse, near-sold-out numbers a real IMAX run produces.
 
 from __future__ import annotations
 
-from tg.core.capacity import estimate_capacity, seats_from_ratio
+from tg.core.capacity import estimate_capacity, reconcile, seats_from_ratio
 
 #: Every distinct ratio observed for IMAX VOLVO across 84 screenings. The two high
 #: values are the one-off concert films that also run in the hall; they are what pins
@@ -54,3 +54,36 @@ def test_reads_the_ratio_out_as_whole_seats():
 def test_unknown_inputs_stay_unknown():
     assert seats_from_ratio(None, 385) is None
     assert seats_from_ratio(0.0156, None) is None
+
+
+# ------------------------------------------------- trusting the ratio at all
+#
+# The complaint this answers: a screening reported four seats above its floor while the
+# booking flow offered none. Until the two sources are read at the same moment and
+# compared, "the threshold is wrong" and "the number means something else" look the same.
+
+
+def test_agreement_means_the_ratio_counts_bookable_seats():
+    # 10 of 385 free, and the picker offers 10.
+    assert reconcile(0.026, 385, 10) == (10, "agree")
+
+
+def test_the_api_claiming_seats_the_picker_will_not_sell():
+    """The reported case: tier 1 says ten free, the seat map offers nothing."""
+    api_free, verdict = reconcile(0.026, 385, 0)
+    assert (api_free, verdict) == (10, "over")
+
+
+def test_the_picker_offering_more_than_the_api_admits():
+    """The opposite failure — chances missed rather than invented."""
+    assert reconcile(0.0156, 385, 12) == (6, "under")
+
+
+def test_no_tier_one_reading_is_not_a_disagreement():
+    assert reconcile(None, 385, 4) == (None, "unknown")
+
+
+def test_the_picker_supplies_the_denominator():
+    """Capacity comes from the page being read, not from an estimate, so a hall whose
+    size was never inferred still reconciles."""
+    assert reconcile(0.5, 100, 50) == (50, "agree")

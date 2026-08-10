@@ -66,3 +66,36 @@ def seats_from_ratio(ratio: float | None, capacity: int | None) -> int | None:
     if ratio is None or capacity is None:
         return None
     return round(ratio * capacity)
+
+
+def reconcile(
+    ratio: float | None, seats_on_page: int, picker_free: int
+) -> tuple[int | None, str]:
+    """Compare what the listing API claims against what the booking flow will sell.
+
+    The reason this exists: a screening reported four seats above its floor while the
+    seat picker offered none at all. If ``availabilityRatio`` counts seats that cannot be
+    bought, every alert this project has ever sent overstates what is there, and no
+    threshold fixes that — so the disagreement has to be measurable rather than argued
+    about.
+
+    ``seats_on_page`` is the picker's own seat count, which is the authoritative capacity
+    and a better denominator than any estimate.
+
+    Returns ``(api_free, verdict)`` with verdict one of:
+
+    ``unknown``
+        No tier-1 reading to compare against.
+    ``agree``
+        The two sources count the same seats. Remaining question is only *which* seats.
+    ``over``
+        The API claims more than the picker offers — the observed complaint.
+    ``under``
+        The picker offers more than the API claims, i.e. chances are being missed.
+    """
+    if ratio is None:
+        return None, "unknown"
+    api_free = round(ratio * seats_on_page)
+    if api_free == picker_free:
+        return api_free, "agree"
+    return api_free, "over" if api_free > picker_free else "under"
