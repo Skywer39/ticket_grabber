@@ -80,11 +80,15 @@ cannot be trusted for cadence. Measured on this repo: a `*/10` cron dispatched a
 of **85, 75, 60 and 65 minutes**; an hourly cron at gaps of **205 and 266 minutes**.
 With 52-minute sessions that left the site unwatched about three quarters of the time.
 
-Sizing the session just under GitHub's 6-hour job ceiling fixes it. An hourly dispatch
-now lands while a session is still running, queues behind the `concurrency` group, and
-starts the moment the current one ends — so sessions abut instead of leaving holes. The
-cron is no longer the cadence; it is what keeps the chain unbroken. Inside a session the
-cadence is the poller's own: 45s in the hot window, 15 min overnight.
+Sizing the session just under GitHub's 6-hour job ceiling fixes it. A dispatch now lands
+while a session is still running, waits in the `concurrency` group, and starts the moment
+the current one ends — so sessions abut instead of leaving holes. The cron is no longer
+the cadence; it is what keeps the chain unbroken. Inside a session the cadence is the
+poller's own: 45s in the hot window, 15 min overnight.
+
+The group holds a *slot*, not a queue — only the newest waiting run survives, and earlier
+ones are cancelled. That is harmless for the scheduled chain, where every dispatch is
+interchangeable, and it is exactly what broke deploys until the change below.
 
 **A merge pre-empts the running session.** Without that a deploy waits for the current
 session to time out, and the concurrency group is not a queue: GitHub keeps one running
@@ -144,12 +148,15 @@ auditorium is a multiple of `1 / capacity`, so the smallest denominator consiste
 all of them *is* the capacity. Flora's IMAX comes out at 385 seats, and "2.1% free"
 becomes "8 of 385 seats free (+2)".
 
-**A sold-out house does not rest at zero.** 47 of 84 tracked 70mm screenings sat at
-*exactly* six free seats — a floor that identical across dozens of independent
-screenings is structural, not stock: wheelchair spaces and their companion seats, which
-the ratio counts and the seat picker will not sell you. So `min_seats_above_floor`
-measures the rise from each screening's own observed minimum rather than from the
-previous reading, and the permanently-unsold seats stop counting as availability.
+**A sold-out house does not rest at zero.** Each screening settles at its own floor of
+seats that simply never sell — measured per screening they are 2, 3, 4, 5, 6 and 29, with
+six the most common among similarly sold-out shows. Measuring a rise from the previous
+reading therefore counts stock that has been sitting there for days. `min_seats_above_floor`
+measures it from each screening's own observed minimum instead.
+
+Note what this does *not* claim: why those seats never sell. Tier 1 sees a count and never
+an identity, so whether they are restricted-view, wheelchair spaces or simply unwanted is
+not something this can tell you — see the limits below.
 
 Why it matters: five days of the old fractional threshold produced 63 alerts, every one
 of them a two-seat move on a house resting at six — a cart timing out, the seats
