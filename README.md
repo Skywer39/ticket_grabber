@@ -238,6 +238,23 @@ tg notify test discord              # confirm alerts actually reach you
 tg status                           # health, recent alerts, polling mode
 ```
 
+## When it breaks, it says so
+
+This sits unattended for months between the moments it matters, so the failure that
+matters is the quiet one. Two alerts exist purely to make silence impossible to mistake
+for calm:
+
+- **`COVERAGE_GAP`** — polling stopped and has resumed, naming the size of the hole.
+  What stops this project is never the poller; it is CI.
+- **`SOURCE_UNHEALTHY`** — polling is running, the endpoint is answering 200, and it is
+  returning nothing. A renamed field or a moved collection path looks *exactly* like a
+  quiet week from the alert channel, and that is how the release this project exists to
+  catch got missed in the first place. Fires after `poll.health_alert_after` consecutive
+  empty or failed polls, once per episode, and re-arms when the source recovers.
+
+Config load also warns when a watch can no longer match anything — a `date_to` that has
+passed leaves the watch enabled, matching nothing, indistinguishable from no news.
+
 ## Adding a site
 
 ```bash
@@ -339,7 +356,7 @@ conditional GETs and backoff regardless.
 
 ```bash
 pip install -e '.[dev]'
-pytest          # 183 tests, run against payloads captured from the live API
+pytest          # 192 tests, run against payloads captured from the live API
 ruff check src tests
 ```
 

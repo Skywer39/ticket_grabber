@@ -17,6 +17,13 @@ poll:
   # Say so on the alert channels when a session resumes after a hole this long — a
   # CI outage stops the poller silently, and the channel you watch should know. 0 off.
   gap_alert_minutes: 90
+  # Report a source that has stopped returning data, after this many polls. 0 off.
+  #
+  # An adapter that raises is obvious. One that keeps answering 200 while returning no
+  # rows is not — from the alert channel it looks exactly like a quiet week, which is
+  # precisely how the release this project exists to catch got missed in the first place.
+  # Says so once per episode and goes quiet again when the source recovers.
+  health_alert_after: 3
   # Wait this long and look again before saying seats freed up. 0 disables.
   #
   # availabilityRatio excludes seats sitting in an open checkout, so on a near-sold-out
@@ -95,8 +102,11 @@ watches:
       formats: [FILM_70MM]
       auditorium_regex: "(?i)imax"
       cinemas: ["1052"]
+      # Scopes this watch to the run. It ages out silently — the watch stays enabled and
+      # simply matches nothing — so config load warns once `date_to` is behind you.
+      # The catch-all below carries no window and keeps working regardless.
       date_from: 2026-08-01
-      date_to: 2026-09-30
+      date_to: 2026-12-31
       time_between: ["16:00", "23:00"]
     seats:
       profile: flora_imax

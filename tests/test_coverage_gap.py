@@ -15,6 +15,7 @@ import httpx
 import pytest
 from sqlmodel import select
 
+from tg import db
 from tg.core.scheduler import Engine
 from tg.models import Alert, PollState, utcnow
 from tg.notify.base import Dispatcher, Notifier
@@ -112,3 +113,87 @@ async def test_no_dispatcher_is_silent(config, session):
     _health(session, minutes_ago=600)
 
     assert await Engine(config).coverage_gap_alert() is None
+
+
+# ------------------------------------------------- a source that has gone blind
+#
+# The gap alert above covers polling *stopping*. This covers the worse case: polling
+# continues, the endpoint keeps answering 200, and it returns nothing — which from the
+# alert channel is indistinguishable from a quiet fortnight, and is how a program release
+# gets missed.
+
+
+def _counters(session, *, empty: int = 0, errors: int = 0, data: dict | None = None) -> None:
+    session.add(
+        PollState(
+            cache_key="cinemacity_cz:health",
+            source="cinemacity_cz",
+            last_polled_at=utcnow(),
+            consecutive_empty=empty,
+            consecutive_errors=errors,
+            data=data or {},
+        )
+    )
+    session.commit()
+
+
+async def test_repeated_empty_polls_are_reported(engine, session):
+    _counters(session, empty=3)
+
+    sent = await engine.health_alert()
+
+    assert [a.screening_key for a in sent] == ["monitor:health:cinemacity_cz"]
+    assert "returns no rows" in sent[0].body
+    assert engine.recorder.sent == sent
+
+
+async def test_outright_failure_is_reported_differently(engine, session):
+    """The two causes need different first moves, so the message must distinguish them."""
+    _counters(session, errors=4)
+
+    body = (await engine.health_alert())[0].body
+    assert "failing outright" in body
+
+
+async def test_a_continuing_outage_is_not_repeated(engine, session):
+    """A fortnight of breakage is one message, not one per cycle."""
+    _counters(session, empty=3)
+    assert len(await engine.health_alert()) == 1
+    assert await engine.health_alert() == []
+
+
+async def test_recovery_rearms_the_alert(engine, session, config):
+    """After the source produces data again, a *later* breakage must speak up rather than
+    be swallowed as a continuation of the first."""
+    from tg.core.scheduler import SourceRunner
+
+    _counters(session, empty=3)
+    await engine.health_alert()
+
+    runner = SourceRunner("cinemacity_cz", config, adapter=None)  # type: ignore[arg-type]
+    with db.session_scope() as s:
+        runner._record_success(s, screening_count=12)  # a good poll
+    with db.session_scope() as s:
+        state = s.exec(
+            select(PollState).where(PollState.cache_key == "cinemacity_cz:health")
+        ).first()
+        state.consecutive_empty = 3  # broken again, later
+        s.add(state)
+
+    assert len(await engine.health_alert()) == 1
+
+
+async def test_healthy_counters_say_nothing(engine, session):
+    _counters(session, empty=1)
+    assert await engine.health_alert() == []
+
+
+async def test_health_threshold_zero_disables(engine, session):
+    _counters(session, empty=50)
+    engine.config.poll.health_alert_after = 0
+    assert await engine.health_alert() == []
+
+
+async def test_no_dispatcher_is_silent_here_too(config, session):
+    _counters(session, empty=9)
+    assert await Engine(config).health_alert() == []

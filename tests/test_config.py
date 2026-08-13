@@ -99,3 +99,48 @@ def test_example_config_is_valid():
     assert "cinemacity_cz" in cfg.sources
     assert cfg.sources["cinemacity_cz"].options["tenant_id"] == 10101
     assert any(w.seats.profile == "flora_imax" for w in cfg.watches)
+
+
+def test_a_watch_whose_window_has_passed_is_flagged(caplog):
+    """`date_to` scopes a watch to one film's run and then ages out silently: enabled,
+    matching nothing, indistinguishable from a quiet period."""
+    import logging
+
+    with caplog.at_level(logging.WARNING):
+        AppConfig.model_validate(
+            {
+                "sources": {"s": {"adapter": "cinemacity", "base_url": "https://x"}},
+                "watches": [
+                    {
+                        "name": "last summer's run",
+                        "source": "s",
+                        "match": {"date_to": "2020-01-01"},
+                        "notify": ["discord"],
+                    }
+                ],
+            }
+        )
+    assert "in the past" in caplog.text
+    assert "last summer's run" in caplog.text
+
+
+def test_a_current_window_is_not_flagged(caplog):
+    import logging
+    from datetime import date, timedelta
+
+    future = (date.today() + timedelta(days=30)).isoformat()
+    with caplog.at_level(logging.WARNING):
+        AppConfig.model_validate(
+            {
+                "sources": {"s": {"adapter": "cinemacity", "base_url": "https://x"}},
+                "watches": [
+                    {
+                        "name": "current run",
+                        "source": "s",
+                        "match": {"date_to": future},
+                        "notify": ["discord"],
+                    }
+                ],
+            }
+        )
+    assert "in the past" not in caplog.text

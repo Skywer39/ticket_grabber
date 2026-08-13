@@ -459,6 +459,10 @@ class SourceRunner:
         # A source that suddenly returns nothing is usually a site change rather than
         # an empty schedule — this counter is what `tg adapter heal` looks at.
         state.consecutive_empty = 0 if screening_count else state.consecutive_empty + 1
+        if screening_count:
+            # Recovered. Drop the "already said so" flag so a *later* breakage is
+            # reported rather than swallowed as a continuation of this one.
+            state.data = {k: v for k, v in (state.data or {}).items() if k != "health_alerted"}
         session.add(state)
 
     def _record_error(self, session: Session, message: str) -> None:
@@ -564,12 +568,84 @@ class Engine:
             session.merge(alert)
         return alert
 
+    async def health_alert(self) -> list[Alert]:
+        """Say on the alert channels when a source has stopped returning data.
+
+        The counters behind this have always been maintained, and three things read them
+        — ``tg status``, the dashboard and ``tg adapter heal`` — every one of which needs
+        somebody to go and look. Meanwhile the only thing the poller said for itself was
+        ``COVERAGE_GAP``, which fires when polling *stops*.
+
+        The failure that leaves is the dangerous one. If the site renames a field and the
+        adapter starts returning zero rows while still answering 200, the session keeps
+        running, nothing is logged as wrong, and the channel is silent — indistinguishable
+        from a quiet fortnight. That is exactly how a program release gets missed, which
+        is the failure this project was built to prevent, one level up.
+
+        Fires once per episode, not once per cycle: a fortnight of breakage is one
+        message, and the flag clears when the source produces data again.
+        """
+        threshold = self.config.poll.health_alert_after
+        if not threshold or self.dispatcher is None:
+            return []
+
+        from tg.agent.scaffold import diagnose_health
+
+        pending: list[tuple[str, str]] = []
+        with session_scope() as session:
+            # Configured sources rather than built runners: a source whose adapter failed
+            # to construct has no runner at all, and that is the loudest breakage there is.
+            for key, source in self.config.sources.items():
+                if not source.enabled:
+                    continue
+                state = session.exec(
+                    select(PollState).where(PollState.cache_key == f"{key}:health")
+                ).first()
+                if state is None or (state.data or {}).get("health_alerted"):
+                    continue
+                verdict = diagnose_health(
+                    state.consecutive_empty, state.consecutive_errors, threshold
+                )
+                if verdict != "healthy":
+                    pending.append((key, verdict))
+
+        sent: list[Alert] = []
+        for key, verdict in pending:
+            alert = Alert(
+                watch_name="monitor",
+                screening_key=f"monitor:health:{key}",
+                change_type="SOURCE_UNHEALTHY",
+                title=f"{key} has stopped returning data",
+                body=(
+                    f"{verdict}\n\nNothing else will alert while this lasts, because there "
+                    "is nothing to compare against — a broken adapter and a quiet week "
+                    "look identical from here."
+                ),
+                channels=list(self.dispatcher.notifiers),
+            )
+            log.warning("%s unhealthy: %s", key, verdict)
+
+            # Deliver first, then persist — same reasoning as `coverage_gap_alert`, and
+            # the flag is only set once the message has actually been attempted.
+            await self.dispatcher.deliver([alert])
+            with session_scope() as session:
+                session.merge(alert)
+                state = session.exec(
+                    select(PollState).where(PollState.cache_key == f"{key}:health")
+                ).first()
+                if state is not None:
+                    state.data = {**(state.data or {}), "health_alerted": True}
+                    session.add(state)
+            sent.append(alert)
+        return sent
+
     async def run_forever(self, stop: asyncio.Event | None = None) -> None:
         stop = stop or asyncio.Event()
         await self.coverage_gap_alert()
         while not stop.is_set():
             for report in await self.poll_once():
                 log.info("%s", report.summary())
+            await self.health_alert()
             delay = self.next_delay()
             log.debug("sleeping %.0fs", delay)
             try:

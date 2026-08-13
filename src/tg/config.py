@@ -65,6 +65,12 @@ class PollConfig(BaseModel):
     #: still leaves polling covered, so a gap this size means nobody was watching.
     #: 0 disables.
     gap_alert_minutes: int = Field(90, ge=0)
+    #: Consecutive empty or failed polls before a source is reported broken. 0 disables.
+    #:
+    #: An adapter that raises is obvious. One that keeps answering 200 while returning no
+    #: rows is not, and it looks exactly like a quiet week from the alert channel — which
+    #: is how a program release gets missed. Alerts once per episode, not per cycle.
+    health_alert_after: int = Field(3, ge=0)
     #: Wait this long and look again before alerting that seats freed up. 0 disables.
     #:
     #: ``availabilityRatio`` excludes seats sitting in somebody's open checkout, so on a
@@ -307,6 +313,7 @@ class AppConfig(BaseModel):
                     f"known profiles: {sorted(self.profiles)}"
                 )
             _warn_unusable_criteria(w)
+            _warn_expired(w, date.today())
         return self
 
     def watch(self, name: str) -> WatchConfig:
@@ -340,6 +347,23 @@ def _warn_unusable_criteria(w: WatchConfig) -> None:
             w.name,
             ", ".join(unusable),
             w.source,
+        )
+
+
+def _warn_expired(w: WatchConfig, today: date) -> None:
+    """Say so when a watch can no longer match anything.
+
+    ``date_to`` is how you scope a watch to one film's run, and it ages out silently: the
+    watch stays enabled, matches nothing, and looks identical to a period with no news.
+    Worth one line at startup, because this is precisely the state nobody notices while
+    they have stopped paying attention.
+    """
+    if w.enabled and w.match.date_to and w.match.date_to < today:
+        log.warning(
+            "watch %r has date_to %s, which is in the past — it cannot match anything. "
+            "Widen or remove the window, or disable the watch to say so deliberately.",
+            w.name,
+            w.match.date_to,
         )
 
 
