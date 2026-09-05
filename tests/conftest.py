@@ -9,6 +9,7 @@ from tg import db
 from tg.config import AppConfig
 
 FIXTURES = Path(__file__).parent / "fixtures" / "cinemacity"
+O2_FIXTURES = Path(__file__).parent / "fixtures" / "o2arena"
 
 
 @pytest.fixture
@@ -19,6 +20,31 @@ def fixture_body():
         return json.loads((FIXTURES / name).read_text(encoding="utf-8"))["body"]
 
     return _load
+
+
+@pytest.fixture
+def o2_feed() -> list[dict]:
+    """A trimmed capture of the O2 arena feed.
+
+    Four events chosen to cover what the mapping has to get right: a music event whose
+    timestamp pins the wall-clock decoding, a sport event, one event with several
+    performances, and the one event in the live feed filed under two categories at
+    once. The CMS markup fields the adapter never reads are stripped.
+    """
+    return json.loads((O2_FIXTURES / "events.json").read_text(encoding="utf-8"))
+
+
+@pytest.fixture
+def o2_adapter():
+    """Adapter instance for pure mapping tests — never makes a request."""
+    from tg.adapters.o2arena import O2ArenaAdapter
+    from tg.config import SourceConfig
+
+    return O2ArenaAdapter(
+        "o2arena_cz",
+        SourceConfig(adapter="o2arena", base_url="https://www.o2arena.cz", options={}),
+        client=None,
+    )
 
 
 @pytest.fixture

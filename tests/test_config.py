@@ -98,7 +98,24 @@ def test_example_config_is_valid():
     cfg = AppConfig.model_validate(raw)
     assert "cinemacity_cz" in cfg.sources
     assert cfg.sources["cinemacity_cz"].options["tenant_id"] == 10101
-    assert any(w.seats.profile == "flora_imax" for w in cfg.watches)
+    # Kept as configuration even though no watch references it while seatmap.enabled is
+    # false — it is what tier 2 reads when you turn it on.
+    assert "flora_imax" in cfg.profiles
+
+    assert "o2arena_cz" in cfg.sources
+    assert cfg.sources["o2arena_cz"].adapter == "o2arena"
+    # The arena feed is one large uncacheable document; without a floor it would be
+    # fetched at the cinema's hot cadence.
+    assert cfg.sources["o2arena_cz"].options["min_interval_seconds"] > 0
+
+    o2 = [w for w in cfg.watches if w.source == "o2arena_cz"]
+    assert {e for w in o2 for e in w.trigger.events} == {"NEW_SCREENING", "ON_SALE"}
+    # The feed publishes no availability at all, so a watch asking for it would look
+    # like coverage and deliver silence.
+    assert not any(
+        e.startswith("AVAILABILITY") or e == "SOLD_OUT" for w in o2 for e in w.trigger.events
+    )
+    assert all(w.match.kinds == ["CONCERT"] for w in o2)
 
 
 def test_a_watch_whose_window_has_passed_is_flagged(caplog):

@@ -25,6 +25,7 @@ def _check(match: WatchMatch, **kw) -> bool:
         venue_external_id="1052",
         starts_at=AUG_4_1640_UTC,
         formats=["2D", "FILM_70MM", "SUBTITLED"],
+        kind="FILM",
         tz_name="Europe/Prague",
     )
     return screening_matches(match, **(defaults | kw))
@@ -35,6 +36,31 @@ def _check(match: WatchMatch, **kw) -> bool:
 
 def test_empty_match_accepts_everything():
     assert _check(_match())
+
+
+def test_kinds_filter_a_mixed_programme():
+    """A venue that hosts concerts and hockey needs a way to say which it means."""
+    assert _check(_match(kinds=["CONCERT"]), kind="CONCERT")
+    assert not _check(_match(kinds=["CONCERT"]), kind="SPORT")
+    assert _check(_match(kinds=["CONCERT", "OTHER"]), kind="OTHER")
+
+
+def test_kinds_unset_accepts_any_kind():
+    """A cinema has one kind of thing on, so the filter must stay optional."""
+    assert _check(_match(), kind="FILM")
+    assert _check(_match(), kind=None)
+
+
+def test_unknown_kind_fails_a_kinds_filter():
+    """'I could not tell' must not quietly become 'close enough' — that is how a
+    hockey match ends up in a watch that asked for concerts."""
+    assert not _check(_match(kinds=["CONCERT"]), kind=None)
+
+
+def test_kinds_are_case_insensitive_and_validated():
+    assert _match(kinds=["concert"]).kinds == ["CONCERT"]
+    with pytest.raises(ValueError, match="unknown kind"):
+        _match(kinds=["HOCKEY"])
 
 
 def test_title_and_auditorium_regexes():
@@ -292,7 +318,7 @@ def test_body_carries_the_dated_cinema_programme_as_a_second_link(session, confi
     imax = next(s for s in seeded if s.auditorium == "IMAX VOLVO")
     body = evaluate(session, config, [_rise(imax, 0.02)])[0].body
     assert (
-        "cinema programme: https://www.cinemacity.cz/cinemas/flora"
+        "venue programme: https://www.cinemacity.cz/cinemas/flora"
         "#/buy-tickets-by-cinema?in-cinema=1052&at=2026-08-04&view-mode=list" in body
     )
 

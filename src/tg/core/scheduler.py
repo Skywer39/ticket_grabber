@@ -62,10 +62,15 @@ class PollReport:
     alerts: list[Alert] = field(default_factory=list)
     seatmaps_read: int = 0
     error: str | None = None
+    #: True when the source was not due yet. Distinct from a poll that ran and found
+    #: nothing — the health machinery must not count it as a source going blind.
+    skipped: bool = False
 
     def summary(self) -> str:
         if self.error:
             return f"{self.source}: ERROR {self.error}"
+        if self.skipped:
+            return f"{self.source}: skipped (not due)"
         bits = [
             f"{self.source}: {self.dates_fetched}/{self.dates_probed} dates",
             f"{self.screenings_seen} screenings",
@@ -112,6 +117,7 @@ class SourceRunner:
         self.adapter = adapter
         self.assistant = assistant
         self.cycle = 0
+        self._last_polled_at: datetime | None = None
 
     @property
     def tz_name(self) -> str:
@@ -125,8 +131,33 @@ class SourceRunner:
     def dates_per_cycle(self) -> int:
         return int(self.config.sources[self.key].options.get("dates_per_cycle", 8))
 
+    @property
+    def min_interval_seconds(self) -> int:
+        """Never poll this source more often than this, whatever the global cadence.
+
+        The hot window exists for a cinema that publishes a programme without warning,
+        and it sets one cadence for every source. A venue whose feed is one large
+        uncacheable document and whose programme changes weekly does not want that
+        cadence, and hammering it would be rude to no purpose. 0 means "follow the
+        global cadence", which is what the cinema wants.
+        """
+        return int(self.config.sources[self.key].options.get("min_interval_seconds", 0))
+
+    def due(self, now: datetime | None = None) -> bool:
+        """Whether this source's own floor has elapsed since it last polled.
+
+        Held in memory rather than in ``PollState``: a skipped tick should cost no
+        write, and the CI poller restarts every few hours, where one extra poll per
+        session is harmless — a cold start is silent and a warm one just re-reads.
+        """
+        if self.min_interval_seconds <= 0 or self._last_polled_at is None:
+            return True
+        elapsed = ((now or utcnow_aware()) - self._last_polled_at).total_seconds()
+        return elapsed >= self.min_interval_seconds
+
     async def poll(self, dispatcher: Dispatcher | None = None) -> PollReport:
         report = PollReport(source=self.key)
+        self._last_polled_at = utcnow_aware()
         try:
             await self._poll_inner(report, dispatcher)
         except Exception as exc:  # noqa: BLE001 — one bad source must not stop the loop
@@ -160,6 +191,20 @@ class SourceRunner:
             venues = await self.adapter.venues()
             with session_scope() as session:
                 sync_venues(session, venues)
+
+        # --- whole-horizon sources skip the date machinery entirely --------
+        #
+        # The rotation below exists because a cinema costs one request per date. A
+        # source that answers the entire programme in a single request has no date
+        # dimension to sweep, and pretending otherwise breaks the diff engine rather
+        # than merely wasting effort: `covered` would be the intersection of a handful
+        # of rotating dates with the scattered days that happen to have events, which
+        # is almost always empty — and an empty `covered` silently disables removal
+        # detection while `tg status` reports dates probed and fetched that bear no
+        # relation to the one request actually made.
+        if Capability.WHOLE_HORIZON in self.adapter.capabilities:
+            await self._poll_whole_horizon(report, dispatcher, today, horizon, cold_start)
+            return
 
         # --- tier 1a: the cheap calendar probe -----------------------------
         calendar = None
@@ -233,7 +278,83 @@ class SourceRunner:
                 len(screenings),
                 len(targets),
             )
-        else:
+        await self._alert_and_deliver(report, dispatcher, cold_start)
+
+    async def _poll_whole_horizon(
+        self,
+        report: PollReport,
+        dispatcher: Dispatcher | None,
+        today: date,
+        horizon: date,
+        cold_start: bool,
+    ) -> None:
+        """Poll a source that answers its whole programme in one request.
+
+        No calendar probe, no date rotation, and `covered` is every date in the window
+        rather than the handful we happened to ask about — which is what makes removal
+        detection mean something here. The adapter is expected to filter to
+        [today, horizon] itself; anything outside it we did not ask for and must not
+        treat as covered.
+        """
+        events, screenings = await self.adapter.screenings(today, horizon, dates=None)
+        screenings = [
+            s for s in screenings if today <= to_local(s.starts_at, self.tz_name).date() <= horizon
+        ]
+        report.screenings_seen = len(screenings)
+
+        span = (horizon - today).days + 1
+        report.dates_probed = span
+        report.dates_fetched = span
+
+        # One request answered for the entire window, so absence within it is real.
+        # Guarded on a non-empty result all the same: a feed that returns nothing is a
+        # site change, not the whole programme being cancelled.
+        covered = set(self._dense_range(today, horizon)) if screenings else set()
+
+        with session_scope() as session:
+            changes = list(sync_events(session, events))
+            changes.extend(
+                sync_screenings(
+                    session,
+                    self.key,
+                    screenings,
+                    covered_dates=covered,
+                    detect_removals=bool(covered),
+                    tz_name=self.tz_name,
+                )
+            )
+            report.changes = changes
+            self._record_success(session, len(screenings))
+
+        # Neither stage applies to the O2 feed — it has no seat maps and publishes no
+        # ratio, so there are no rises to confirm — and both return immediately when
+        # there is nothing to do. They are here so that a future whole-horizon source
+        # with those capabilities behaves like every other source rather than quietly
+        # losing them.
+        if self.config.seatmap.enabled and Capability.SEATMAP in self.adapter.capabilities:
+            titles = {e.external_id: e.title for e in events}
+            seat_changes = await self._read_seatmaps(report.changes, screenings, titles)
+            report.changes.extend(seat_changes)
+            report.seatmaps_read = len({c.screening_key for c in seat_changes})
+
+        if not cold_start and self.config.poll.confirm_seconds:
+            report.changes = await self._confirm_rises(report.changes)
+
+        if cold_start:
+            log.info(
+                "%s: seeded baseline with %d screenings across %d days — "
+                "alerting starts from the next poll",
+                self.key,
+                len(screenings),
+                span,
+            )
+        await self._alert_and_deliver(report, dispatcher, cold_start)
+
+    async def _alert_and_deliver(
+        self, report: PollReport, dispatcher: Dispatcher | None, cold_start: bool
+    ) -> None:
+        """Evaluate watches against this cycle's changes and push what they produce."""
+        if not cold_start:
             with session_scope() as session:
                 report.alerts = evaluate(session, self.config, report.changes)
 
@@ -500,6 +621,11 @@ class Engine:
         sem = asyncio.Semaphore(self.config.poll.max_concurrency)
 
         async def run(runner: SourceRunner) -> PollReport:
+            # A source with its own floor sits out the ticks it is not due for. It
+            # returns a report saying so rather than nothing, so `tg status` shows a
+            # skip as a skip and the health machinery never sees an empty poll.
+            if not runner.due():
+                return PollReport(source=runner.key, skipped=True)
             async with sem:
                 return await runner.poll(self.dispatcher)
 

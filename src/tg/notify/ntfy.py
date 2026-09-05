@@ -8,7 +8,7 @@ from tg.models import Alert
 from tg.notify.base import Notifier
 
 #: Anything that means "act now" gets a priority that survives Do Not Disturb.
-_HIGH_PRIORITY = {"NEW_SCREENING", "NEW_DATE", "SEAT_FREED", "BACK_ON_SALE"}
+_HIGH_PRIORITY = {"NEW_SCREENING", "NEW_DATE", "SEAT_FREED", "BACK_ON_SALE", "ON_SALE"}
 
 _TAGS = {
     "NEW_SCREENING": "ticket",
@@ -18,6 +18,7 @@ _TAGS = {
     "AVAILABILITY_DROP": "chart_with_downwards_trend",
     "SOLD_OUT": "no_entry",
     "BACK_ON_SALE": "recycle",
+    "ON_SALE": "tickets",
 }
 
 

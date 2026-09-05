@@ -232,3 +232,42 @@ def test_late_night_screenings_are_dated_the_way_the_cinema_dates_them(session, 
         now=datetime(2026, 8, 1, tzinfo=UTC),
     )
     assert {c.change_type for c in changes} == {ChangeType.SCREENING_REMOVED}
+
+
+def test_tickets_going_on_sale_is_its_own_change(session, aug4):
+    """A show announced months ahead becomes buyable — the O2 arena signal.
+
+    Distinct from BACK_ON_SALE, which is a sold-out house releasing stock. Here nothing
+    was ever released; it simply could not be bought until now.
+    """
+    events, screenings = aug4
+    sync_events(session, events)
+
+    target = screenings[0]
+    target.sales_blocked = True
+    sync_screenings(session, "cinemacity_cz", screenings, covered_dates={AUG_4})
+
+    target.sales_blocked = False
+    changes = sync_screenings(session, "cinemacity_cz", screenings, covered_dates={AUG_4})
+
+    on_sale = [c for c in changes if c.change_type is ChangeType.ON_SALE]
+    assert len(on_sale) == 1
+    assert on_sale[0].screening_key == target.key
+    assert on_sale[0].old == {"sales_blocked": True}
+    assert on_sale[0].new == {"sales_blocked": False}
+
+
+def test_sales_closing_again_is_silent(session, aug4):
+    """The reverse is not news: it either re-opens (alerting then) or the screening
+    disappears, which SCREENING_REMOVED already covers."""
+    events, screenings = aug4
+    sync_events(session, events)
+
+    target = screenings[0]
+    target.sales_blocked = False
+    sync_screenings(session, "cinemacity_cz", screenings, covered_dates={AUG_4})
+
+    target.sales_blocked = True
+    changes = sync_screenings(session, "cinemacity_cz", screenings, covered_dates={AUG_4})
+
+    assert not [c for c in changes if c.change_type is ChangeType.ON_SALE]

@@ -30,6 +30,7 @@ SCREENING_CHANGES = {
     ChangeType.AVAILABILITY_DROP,
     ChangeType.SOLD_OUT,
     ChangeType.BACK_ON_SALE,
+    ChangeType.ON_SALE,
     ChangeType.PRICE_CHANGE,
     ChangeType.SEAT_FREED,
 }
@@ -117,10 +118,15 @@ def screening_matches(
     venue_external_id: str | None,
     starts_at: datetime | None,
     formats: list[str],
+    kind: str | None = None,
     tz_name: str = DEFAULT_TZ,
 ) -> bool:
     """All specified criteria must hold; unspecified criteria are ignored."""
     if match.title_regex and not (title and re.search(match.title_regex, title)):
+        return False
+    # An unknown kind fails a kinds filter rather than passing it: a mixed-programme
+    # venue is exactly where "I could not tell" must not become "close enough".
+    if match.kinds and (kind is None or kind.upper() not in match.kinds):
         return False
     if match.auditorium_regex and not (
         auditorium and re.search(match.auditorium_regex, auditorium)
@@ -243,6 +249,8 @@ class _Resolved:
     formats: list[str]
     booking_url: str | None
     availability_ratio: float | None
+    #: FILM / CONCERT / SPORT / ... — what a ``match.kinds`` filter tests against.
+    kind: str | None = None
     #: Film page, e.g. /films/odyssea/7268s2r — a plain document listing showtimes.
     event_url: str | None = None
     #: Cinema programme page, e.g. /cinemas/flora. Same idea, scoped to the venue.
@@ -272,6 +280,7 @@ def _resolve(session: Session, change: Change) -> _Resolved:
             formats=sorted(str(f) for f in ns.formats),
             booking_url=ns.booking_url,
             availability_ratio=ns.availability_ratio,
+            kind=ev.kind if ev else None,
             event_url=ev.url if ev else None,
             venue_url=venue.url if venue else None,
             info_url=ns.info_url,
@@ -293,6 +302,7 @@ def _resolve(session: Session, change: Change) -> _Resolved:
                 formats=list(row.formats or []),
                 booking_url=row.booking_url,
                 availability_ratio=row.availability_ratio,
+                kind=ev.kind if ev else None,
                 event_url=ev.url if ev else None,
                 venue_url=venue.url if venue else None,
                 info_url=row.info_url,
@@ -412,6 +422,7 @@ def _candidate_alerts(
                     venue_external_id=ctx.venue_external_id,
                     starts_at=ctx.starts_at,
                     formats=ctx.formats,
+                    kind=ctx.kind,
                     tz_name=tz_name,
                 ):
                     continue
@@ -501,6 +512,7 @@ def _build_alert(
         ChangeType.AVAILABILITY_DROP: "Selling fast",
         ChangeType.SOLD_OUT: "Sold out",
         ChangeType.BACK_ON_SALE: "Back on sale",
+        ChangeType.ON_SALE: "Tickets on sale now",
         ChangeType.SEAT_FREED: "Good seats available",
         ChangeType.PRICE_CHANGE: "Price changed",
         ChangeType.SCREENING_REMOVED: "Screening removed",
@@ -572,7 +584,7 @@ def _build_alert(
     url = ctx.info_url or ctx.event_url or ctx.venue_info_url or ctx.venue_url or ctx.booking_url
     programme = ctx.venue_info_url or ctx.venue_url
     if programme and programme not in (url, ctx.booking_url):
-        lines.append(f"cinema programme: {programme}")
+        lines.append(f"venue programme: {programme}")
 
     return Alert(
         watch_name=watch.name,

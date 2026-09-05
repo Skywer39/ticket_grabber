@@ -1,0 +1,423 @@
+[
+ {
+  "Event": {
+   "Event_id": 61870,
+   "Modified_Date": 1788519540,
+   "URL": "https://www.o2arena.cz/events/the-pussycat-dolls-pcd-forever-tour/",
+   "Title": "The Pussycat Dolls: PCD FOREVER TOUR",
+   "Content_Type": "oarena_events",
+   "Stage": 2,
+   "Categories": {
+    "6": {
+     "title": "Hudba",
+     "subcategories": {
+      "2825": {
+       "title": "Pop"
+      },
+      "2833": {
+       "title": "R'n'B"
+      }
+     }
+    }
+   },
+   "Entry_since": "18:00",
+   "Organizer": "LIVE NATION CZECH REPUBLIC s.r.o.",
+   "Translation": {
+    "ID": 61878,
+    "URL": "https://www.o2arena.cz/en/events/the-pussycat-dolls-pcd-forever-tour-en/"
+   },
+   "Images": {
+    "Image_square": "https://www.o2arena.cz/wp-content/uploads/2026/03/1080x1080-pussycatdolls-1.jpg",
+    "vypis_eventu": "https://www.o2arena.cz/wp-content/uploads/2026/03/1080x1080-pussycatdolls-1.jpg",
+    "square": "https://www.o2arena.cz/wp-content/uploads/2026/03/1080x1080-pussycatdolls-1.jpg",
+    "Image_wide": "https://www.o2arena.cz/wp-content/uploads/2026/03/1322x623-pussycatdolls.jpg",
+    "vypis_clanku": "https://www.o2arena.cz/wp-content/uploads/2026/03/1322x623-pussycatdolls.jpg",
+    "mini_carousel": "https://www.o2arena.cz/wp-content/uploads/2026/03/minicarousel-pussycatdoll.jpg",
+    "detail_eventu_a_carousel": "https://www.o2arena.cz/wp-content/uploads/2026/03/1280x2502-pussycatdolls.jpg",
+    "tall": "https://www.o2arena.cz/wp-content/uploads/2026/03/1280x2502-pussycatdolls.jpg",
+    "carousel": "https://www.o2arena.cz/wp-content/uploads/2026/03/carousel-pussycatsdoll.jpg"
+   },
+   "Sale_info": "Právě probíhá v prodejních sítích <a href=\"https://www.ticketportal.cz/event/The-Pussycat-Dolls-PCD-FOREVER-TOUR-183038\" target=\"_blank\" title=\"Ticketportal\">Ticketportal</a> a <a href=\"https://www.ticketmaster.cz/artist/30974?brand=cz_livenation\" target=\"_blank\" title=\"Ticketmaster\">Ticketmaster</a>",
+   "Performances": [
+    {
+     "Performance_id": "35640359",
+     "Ticketportal_Id": "-2147473671",
+     "Date": 1790190000,
+     "Selling_since": 1774000800,
+     "Selling_until": 1790190000,
+     "Tickets": [
+      {
+       "ticket_operator": "Ticketportal",
+       "ticket_url": "https://www.ticketportal.cz/event/The-Pussycat-Dolls-PCD-FOREVER-TOUR-183038"
+      },
+      {
+       "ticket_operator": "Ticketmaster",
+       "ticket_url": "https://www.ticketmaster.cz/artist/30974?brand=cz_livenation"
+      }
+     ],
+     "isCanceled": null,
+     "isPostponed": null,
+     "isSoldout": null
+    }
+   ]
+  }
+ },
+ {
+  "Event": {
+   "Event_id": 67352,
+   "Modified_Date": 1788519600,
+   "URL": "https://www.o2arena.cz/events/hc-sparta-praha-hc-vitkovice-ridera-26-01/",
+   "Title": "HC Sparta Praha – HC Vítkovice Ridera",
+   "Content_Type": "oarena_events",
+   "Stage": 2,
+   "Categories": {
+    "4": {
+     "title": "Sport",
+     "subcategories": {
+      "2821": {
+       "title": "Hokej"
+      }
+     }
+    }
+   },
+   "Entry_since": "15:00",
+   "Organizer": "HC Sparta Praha a.s.",
+   "Translation": {
+    "ID": 67357,
+    "URL": "https://www.o2arena.cz/en/events/hc-sparta-praha-hc-vitkovice-ridera-26-01-en/"
+   },
+   "Images": {
+    "Image_square": "https://www.o2arena.cz/wp-content/uploads/2026/08/1080x1080-4.png",
+    "vypis_eventu": "https://www.o2arena.cz/wp-content/uploads/2026/08/1080x1080-4.png",
+    "square": "https://www.o2arena.cz/wp-content/uploads/2026/08/1080x1080-4.png",
+    "Image_wide": "https://www.o2arena.cz/wp-content/uploads/2026/08/1322x623-3.png",
+    "vypis_clanku": "https://www.o2arena.cz/wp-content/uploads/2026/08/1322x623-3.png",
+    "mini_carousel": "https://www.o2arena.cz/wp-content/uploads/2026/08/933x768-12.png",
+    "detail_eventu_a_carousel": "https://www.o2arena.cz/wp-content/uploads/2026/08/1280x2502-vit.jpg",
+    "tall": "https://www.o2arena.cz/wp-content/uploads/2026/08/1280x2502-vit.jpg",
+    "carousel": "https://www.o2arena.cz/wp-content/uploads/2026/08/1280x1706-12.png"
+   },
+   "Sale_info": "V prodeji od 11.9.2026 v prodejních sítích <a href=\"https://www.ticketmaster.cz/artist/hc-sparta-praha-vstupenky/1015848\" target=\"_blank\" title=\"Ticketmaster\">Ticketmaster</a> a <a href=\"https://www.ticketportal.cz/nevent/HC_SPARTA_PRAHA-281\" target=\"_blank\" title=\"Ticketportal\">Ticketportal</a>",
+   "Performances": [
+    {
+     "Performance_id": "19839204",
+     "Ticketportal_VIP_Id": "-2147472818",
+     "Date": 1791734400,
+     "Selling_since": 1789124400,
+     "Selling_until": 1791734400,
+     "Tickets": [
+      {
+       "ticket_operator": "Ticketportal",
+       "ticket_url": "https://www.ticketportal.cz/nevent/HC_SPARTA_PRAHA-281"
+      },
+      {
+       "ticket_operator": "Ticketmaster",
+       "ticket_url": "https://www.ticketmaster.cz/artist/hc-sparta-praha-vstupenky/1015848"
+      }
+     ],
+     "isCanceled": null,
+     "isPostponed": null,
+     "isSoldout": null
+    }
+   ]
+  }
+ },
+ {
+  "Event": {
+   "Event_id": 58163,
+   "Modified_Date": 1788170880,
+   "URL": "https://www.o2arena.cz/events/yzo-o2-arena/",
+   "Title": "YZO O2 ARENA",
+   "Content_Type": "oarena_events",
+   "Stage": 2,
+   "Categories": {
+    "6": {
+     "title": "Hudba",
+     "subcategories": {
+      "2831": {
+       "title": "Hiphop"
+      }
+     }
+    }
+   },
+   "Entry_since": "18:30 (26. 9.) a 17:30 (27. 9.)",
+   "Organizer": "Bestsport, a.s.",
+   "Translation": {
+    "ID": 58166,
+    "URL": "https://www.o2arena.cz/en/events/yzo-o2-arena-en/"
+   },
+   "Images": {
+    "Image_square": "https://www.o2arena.cz/wp-content/uploads/2025/12/1080-x-1080.png",
+    "vypis_eventu": "https://www.o2arena.cz/wp-content/uploads/2025/12/1080-x-1080.png",
+    "square": "https://www.o2arena.cz/wp-content/uploads/2025/12/1080-x-1080.png",
+    "Image_wide": "https://www.o2arena.cz/wp-content/uploads/2025/12/1322-x-623-2.png",
+    "vypis_clanku": "https://www.o2arena.cz/wp-content/uploads/2025/12/1322-x-623-2.png",
+    "mini_carousel": "https://www.o2arena.cz/wp-content/uploads/2025/12/minicarousel-yzo.jpg",
+    "detail_eventu_a_carousel": "https://www.o2arena.cz/wp-content/uploads/2025/12/yzo-carousel-uprava.jpg",
+    "tall": "https://www.o2arena.cz/wp-content/uploads/2025/12/yzo-carousel-uprava.jpg",
+    "carousel": "https://www.o2arena.cz/wp-content/uploads/2025/12/yzo-carousel.jpg"
+   },
+   "Sale_info": "Právě probíhá v prodejních sítích <a href=\"https://www.ticketportal.cz/event/YZO-O2-ARENA\" target=\"_blank\" title=\"Ticketportal\">Ticketportal</a> a <a href=\"https://www.ticketmaster.cz/artist/yzo-vstupenky/1439863\" target=\"_blank\" title=\"Ticketmaster\">Ticketmaster</a>",
+   "Performances": [
+    {
+     "Performance_id": "81792952",
+     "Ticketportal_Id": "-2147474046",
+     "Date": 1790452800,
+     "Selling_since": 1765306800,
+     "Selling_until": 1790452800,
+     "Tickets": [
+      {
+       "ticket_operator": "Ticketportal",
+       "ticket_url": "https://www.ticketportal.cz/event/YZO-O2-ARENA"
+      },
+      {
+       "ticket_operator": "Ticketmaster",
+       "ticket_url": "https://www.ticketmaster.cz/artist/yzo-vstupenky/1439863"
+      }
+     ],
+     "isCanceled": null,
+     "isPostponed": null,
+     "isSoldout": null
+    },
+    {
+     "Performance_id": "91819491",
+     "Ticketportal_Id": "-2147473933",
+     "Date": 1790535600,
+     "Selling_since": 1765702800,
+     "Selling_until": 1790535600,
+     "Tickets": [
+      {
+       "ticket_operator": "Ticketportal",
+       "ticket_url": "https://www.ticketportal.cz/event/YZO-O2-ARENA"
+      },
+      {
+       "ticket_operator": "Ticketmaster",
+       "ticket_url": "https://www.ticketmaster.cz/artist/yzo-vstupenky/1439863"
+      }
+     ],
+     "isCanceled": null,
+     "isPostponed": null,
+     "isSoldout": null
+    }
+   ]
+  }
+ },
+ {
+  "Event": {
+   "Event_id": 56775,
+   "Modified_Date": 1788100740,
+   "URL": "https://www.o2arena.cz/events/fmx-gladiator-games-2026/",
+   "Title": "FMX GLADIATOR GAMES 2026",
+   "Content_Type": "oarena_events",
+   "Stage": 2,
+   "Categories": {
+    "4": {
+     "title": "Sport",
+     "subcategories": {
+      "2823": {
+       "title": "Ostatní"
+      }
+     }
+    },
+    "5": {
+     "title": "Rodinné a jiné akce",
+     "subcategories": {
+      "2837": {
+       "title": "Show"
+      }
+     }
+    }
+   },
+   "Entry_since": "12:00 a 17:30",
+   "Organizer": "WTF Communication s.r.o.",
+   "Translation": {
+    "ID": 56783,
+    "URL": "https://www.o2arena.cz/en/events/fmx-gladiator-games-2026-2/"
+   },
+   "Images": {
+    "Image_square": "https://www.o2arena.cz/wp-content/uploads/2025/11/fmx-2026-600-x-600.jpg",
+    "vypis_eventu": "https://www.o2arena.cz/wp-content/uploads/2025/11/fmx-2026-600-x-600.jpg",
+    "square": "https://www.o2arena.cz/wp-content/uploads/2025/11/fmx-2026-600-x-600.jpg",
+    "Image_wide": "https://www.o2arena.cz/wp-content/uploads/2025/11/fmx-2026-1322-x-623.jpg",
+    "vypis_clanku": "https://www.o2arena.cz/wp-content/uploads/2025/11/fmx-2026-1322-x-623.jpg",
+    "mini_carousel": "https://www.o2arena.cz/wp-content/uploads/2025/11/fmx-minicarousel.jpg",
+    "detail_eventu_a_carousel": "https://www.o2arena.cz/wp-content/uploads/2025/11/fmx-2026-1280-x-2502.jpg",
+    "tall": "https://www.o2arena.cz/wp-content/uploads/2025/11/fmx-2026-1280-x-2502.jpg",
+    "carousel": "https://www.o2arena.cz/wp-content/uploads/2025/11/fmx-carousel.jpg"
+   },
+   "Sale_info": "Právě probíhá v prodejních sítích <a href=\"https://www.ticketportal.cz/event/FMX-GLADIATORS-GAMES-2026\" target=\"_blank\" title=\"Ticketportal\">Ticketportal</a> a <a href=\"https://www.ticketmaster.cz/artist/1018982\" target=\"_blank\" title=\"Ticketmaster\">Ticketmaster</a>",
+   "Performances": [
+    {
+     "Performance_id": "63186179",
+     "Ticketportal_Id": "-2147474177",
+     "Date": 1797687000,
+     "Selling_since": 1762646340,
+     "Selling_until": 1797687000,
+     "Tickets": [
+      {
+       "ticket_operator": "Ticketportal",
+       "ticket_url": "https://www.ticketportal.cz/event/FMX-GLADIATORS-GAMES-2026"
+      },
+      {
+       "ticket_operator": "Ticketmaster",
+       "ticket_url": "https://www.ticketmaster.cz/artist/1018982"
+      }
+     ],
+     "isCanceled": null,
+     "isPostponed": null,
+     "isSoldout": null
+    },
+    {
+     "Performance_id": "7162153",
+     "Ticketportal_Id": "-2147474171",
+     "Date": 1797706800,
+     "Selling_since": 1762646340,
+     "Selling_until": 1797706800,
+     "Tickets": [
+      {
+       "ticket_operator": "Ticketportal",
+       "ticket_url": "https://www.ticketportal.cz/event/FMX-GLADIATORS-GAMES-2026"
+      },
+      {
+       "ticket_operator": "Ticketmaster",
+       "ticket_url": "https://www.ticketmaster.cz/artist/1018982"
+      }
+     ],
+     "isCanceled": null,
+     "isPostponed": null,
+     "isSoldout": null
+    }
+   ]
+  }
+ },
+ {
+  "Event": {
+   "Event_id": 67079,
+   "Modified_Date": 1787163900,
+   "URL": "https://www.o2arena.cz/events/prohlidkove-okruhy-v-o2-arene-2026-10-03/",
+   "Title": "Prohlídkové okruhy v O2 areně",
+   "Content_Type": "oarena_events",
+   "Stage": 2,
+   "Categories": {
+    "5": {
+     "title": "Rodinné a jiné akce"
+    }
+   },
+   "Entry_since": "15 minut před začátkem prohlídky",
+   "Organizer": "Bestsport, a.s.",
+   "Translation": {
+    "ID": 67102,
+    "URL": "https://www.o2arena.cz/en/events/prohlidkove-okruhy-v-o2-arene-2026-10-03-en/"
+   },
+   "Images": {
+    "Image_square": "https://www.o2arena.cz/wp-content/uploads/2026/01/prohlidkove-okruhy-bannery21280x1365.png",
+    "vypis_eventu": "https://www.o2arena.cz/wp-content/uploads/2026/01/prohlidkove-okruhy-bannery21280x1365.png",
+    "square": "https://www.o2arena.cz/wp-content/uploads/2026/01/prohlidkove-okruhy-bannery21280x1365.png",
+    "Image_wide": "https://www.o2arena.cz/wp-content/uploads/2026/03/prohlidkove-okruhy-bannery21322x623.png",
+    "vypis_clanku": "https://www.o2arena.cz/wp-content/uploads/2026/03/prohlidkove-okruhy-bannery21322x623.png",
+    "detail_eventu_a_carousel": "https://www.o2arena.cz/wp-content/uploads/2026/05/detail-eventu-a-carousel-prohlidky.jpg",
+    "tall": "https://www.o2arena.cz/wp-content/uploads/2026/05/detail-eventu-a-carousel-prohlidky.jpg"
+   },
+   "Sale_info": "Právě probíhá v prodejní síti <a href=\"https://www.ticketportal.cz/event/Prohlidkovy-okruh-v-O2-arene\" target=\"_blank\" title=\"Ticketportal\">Ticketportal</a>",
+   "Performances": [
+    {
+     "Performance_id": "94999138",
+     "Ticketportal_Id": "-2147472676",
+     "Date": 1791032400,
+     "Selling_since": 1787160832,
+     "Selling_until": 1791032400,
+     "Tickets": [
+      {
+       "ticket_operator": "Ticketportal",
+       "ticket_url": "https://www.ticketportal.cz/event/Prohlidkovy-okruh-v-O2-arene"
+      }
+     ],
+     "isCanceled": null,
+     "isPostponed": null,
+     "isSoldout": null
+    },
+    {
+     "Performance_id": "82221889",
+     "Ticketportal_Id": "-2147472675",
+     "Date": 1791043200,
+     "Selling_since": 1787163325,
+     "Selling_until": 1791043200,
+     "Tickets": [
+      {
+       "ticket_operator": "Ticketportal",
+       "ticket_url": "https://www.ticketportal.cz/event/Prohlidkovy-okruh-v-O2-arene"
+      }
+     ],
+     "isCanceled": null,
+     "isPostponed": null,
+     "isSoldout": null
+    }
+   ]
+  }
+ },
+ {
+  "Event": {
+   "Event_id": 67097,
+   "Modified_Date": 1787163960,
+   "URL": "https://www.o2arena.cz/events/prohlidkove-okruhy-v-o2-arene-2026-10-31/",
+   "Title": "Prohlídkové okruhy v O2 areně",
+   "Content_Type": "oarena_events",
+   "Stage": 2,
+   "Categories": {
+    "5": {
+     "title": "Rodinné a jiné akce"
+    }
+   },
+   "Entry_since": "15 minut před začátkem prohlídky",
+   "Organizer": "Bestsport, a.s.",
+   "Translation": {
+    "ID": 67093,
+    "URL": "https://www.o2arena.cz/en/events/prohlidkove-okruhy-v-o2-arene-2026-10-31-en/"
+   },
+   "Images": {
+    "Image_square": "https://www.o2arena.cz/wp-content/uploads/2026/01/prohlidkove-okruhy-bannery21280x1365.png",
+    "vypis_eventu": "https://www.o2arena.cz/wp-content/uploads/2026/01/prohlidkove-okruhy-bannery21280x1365.png",
+    "square": "https://www.o2arena.cz/wp-content/uploads/2026/01/prohlidkove-okruhy-bannery21280x1365.png",
+    "Image_wide": "https://www.o2arena.cz/wp-content/uploads/2026/03/prohlidkove-okruhy-bannery21322x623.png",
+    "vypis_clanku": "https://www.o2arena.cz/wp-content/uploads/2026/03/prohlidkove-okruhy-bannery21322x623.png",
+    "detail_eventu_a_carousel": "https://www.o2arena.cz/wp-content/uploads/2026/05/detail-eventu-a-carousel-prohlidky.jpg",
+    "tall": "https://www.o2arena.cz/wp-content/uploads/2026/05/detail-eventu-a-carousel-prohlidky.jpg"
+   },
+   "Sale_info": "Právě probíhá v prodejní síti <a href=\"https://www.ticketportal.cz/event/Prohlidkovy-okruh-v-O2-arene\" target=\"_blank\" title=\"Ticketportal\">Ticketportal</a>",
+   "Performances": [
+    {
+     "Performance_id": "94999138",
+     "Ticketportal_Id": "-2147472674",
+     "Date": 1793451600,
+     "Selling_since": 1787160832,
+     "Selling_until": 1793451600,
+     "Tickets": [
+      {
+       "ticket_operator": "Ticketportal",
+       "ticket_url": "https://www.ticketportal.cz/event/Prohlidkovy-okruh-v-O2-arene"
+      }
+     ],
+     "isCanceled": null,
+     "isPostponed": null,
+     "isSoldout": null
+    },
+    {
+     "Performance_id": "82221889",
+     "Ticketportal_Id": "-2147472673",
+     "Date": 1793462400,
+     "Selling_since": 1787163325,
+     "Selling_until": 1793462400,
+     "Tickets": [
+      {
+       "ticket_operator": "Ticketportal",
+       "ticket_url": "https://www.ticketportal.cz/event/Prohlidkovy-okruh-v-O2-arene"
+      }
+     ],
+     "isCanceled": null,
+     "isPostponed": null,
+     "isSoldout": null
+    }
+   ]
+  }
+ }
+]
