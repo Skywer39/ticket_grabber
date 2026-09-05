@@ -29,6 +29,11 @@ class Capability(StrEnum):
     #: single most valuable capability for catching an early program release, because
     #: it turns a whole-horizon sweep into one request.
     CALENDAR = "CALENDAR"
+    #: One request returns the whole published programme, with no date dimension to
+    #: sweep. The scheduler's date rotation is meaningless for such a source — see
+    #: :meth:`tg.core.scheduler.SourceRunner._poll_inner` — so it fetches once per cycle
+    #: and treats every date in the window as covered.
+    WHOLE_HORIZON = "WHOLE_HORIZON"
     AVAILABILITY_RATIO = "AVAILABILITY_RATIO"
     SEATMAP = "SEATMAP"
 
@@ -119,7 +124,7 @@ def build_adapter(key: str, config: SourceConfig, client: PoliteClient) -> Sourc
     # Importing here (rather than at module scope) keeps the registry populated
     # without adapter modules importing this one at import time.
     from tg import adapters  # noqa: F401
-    from tg.adapters import cinemacity  # noqa: F401
+    from tg.adapters import cinemacity, o2arena  # noqa: F401
 
     try:
         cls = _REGISTRY[config.adapter]
@@ -132,6 +137,6 @@ def build_adapter(key: str, config: SourceConfig, client: PoliteClient) -> Sourc
 
 
 def registered_adapters() -> list[str]:
-    from tg.adapters import cinemacity  # noqa: F401
+    from tg.adapters import cinemacity, o2arena  # noqa: F401
 
     return sorted(_REGISTRY)

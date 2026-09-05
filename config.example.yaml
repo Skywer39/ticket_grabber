@@ -86,6 +86,31 @@ sources:
       cinemas: ["1052"]        # 1052 = Praha Flora (has the IMAX VOLVO 70mm screen)
       days_ahead: 60
 
+  o2arena_cz:
+    adapter: o2arena
+    base_url: "https://www.o2arena.cz"
+    options:
+      # /wp-json/universum/v1/events with stage 3 is the smaller hall next door, if you
+      # ever want it. It is a second source block, not a second option here.
+      endpoint: "/wp-json/arena/v1/events"
+      stage: 2
+      venue_name: "O2 arena"
+      city: "Praha"
+      # The feed publishes its whole programme in one response — measured out to Feb
+      # 2028 — and the scheduler treats everything inside days_ahead as covered. Set it
+      # wide enough to hold the entire published programme, or a show beyond the edge
+      # gets re-announced every time the window rolls over it.
+      days_ahead: 800
+      # Poll at most twice an hour, whatever the global cadence says.
+      #
+      # This is one ~837 KB document with no ETag, no Last-Modified, `Cache-Control:
+      # no-store` and no gzip, so every poll pays for the whole thing and a conditional
+      # GET buys nothing. At the 45s hot cadence that is over a gigabyte a day against a
+      # programme that changes about weekly. The hot window exists for a cinema that
+      # publishes without warning; an arena announcing a tour six months out does not
+      # need it, and hammering the site for it would be rude to no purpose.
+      min_interval_seconds: 1800
+
 profiles:
   flora_imax:
     venue: "Praha Flora"
@@ -95,27 +120,41 @@ profiles:
     avoid_rows: [1, 2, 3]
 
 watches:
-  - name: "Odyssea IMAX 70mm"
+  # --- Praha Flora, the IMAX hall ------------------------------------------
+  #
+  # These two used to be one watch scoped to a single film — "Odyssea IMAX 70mm" — which
+  # is what the project was built for. That run is over, and a watch named after one
+  # title only ever catches the release you already knew about. Both rules below are
+  # keyed on the auditorium instead, so the next thing to sell out is caught the same way
+  # this one would have been.
+  #
+  # Keyed on the hall rather than on `formats: [FILM_70MM]` deliberately. The hall also
+  # hosts one-off events — concert films, anniversary screenings — that run in IMAX
+  # without carrying the 70-mm attribute, and a format filter drops them silently.
+  #
+  # They are two watches rather than one because their cooldowns want to differ: an
+  # announcement is worth hearing once an hour at most, while a block of seats coming
+  # back is worth hearing about promptly or not at all.
+  - name: "Anything new in the IMAX hall"
     source: cinemacity_cz
     match:
-      title_regex: "(?i)odyss"
-      formats: [FILM_70MM]
       auditorium_regex: "(?i)imax"
       cinemas: ["1052"]
-      # Scopes this watch to the run. It ages out silently — the watch stays enabled and
-      # simply matches nothing — so config load warns once `date_to` is behind you.
-      # The catch-all below carries no window and keeps working regardless.
-      date_from: 2026-08-01
-      date_to: 2026-12-31
-      time_between: ["16:00", "23:00"]
-    seats:
-      profile: flora_imax
-      min_contiguous: 2
+    trigger:
+      on: [NEW_SCREENING]
+    notify: [discord]
+    cooldown: 1h
+
+  - name: "Seats freed up in the IMAX hall"
+    source: cinemacity_cz
+    match:
+      auditorium_regex: "(?i)imax"
+      cinemas: ["1052"]
     trigger:
       # SEAT_FREED is deliberately absent: it is a tier-2 change type and cannot fire
       # while `seatmap.enabled` is false. Listing it only implies a filter that is not
-      # running — the same is true of `seats` above, which tier 1 cannot apply either.
-      on: [NEW_SCREENING, AVAILABILITY_RISE]
+      # running.
+      on: [AVAILABILITY_RISE]
       # Measured in seats above this screening's own resting level, not in ratio points.
       #
       # Flora's IMAX is 385 seats and sits at exactly 6 free on most sold-out dates —
@@ -130,37 +169,57 @@ watches:
       max_availability: 0.10
     notify: [discord]
     cooldown: 10m
-    assist: off
-
-  # Catch-all: anything newly published in the IMAX hall, whatever the film.
-  # This is the rule that would have caught the early release.
-  #
-  # Keyed on the auditorium rather than on `formats: [FILM_70MM]` deliberately. The
-  # hall also hosts one-off events — concert films, anniversary screenings — that run
-  # in IMAX without carrying the 70-mm attribute, and a format filter drops them
-  # silently.
-  - name: "Anything new in the IMAX hall"
-    source: cinemacity_cz
-    match:
-      auditorium_regex: "(?i)imax"
-      cinemas: ["1052"]
-    trigger:
-      on: [NEW_SCREENING]
-    notify: [discord]
-    cooldown: 1h
 
   # The cheapest and earliest signal there is: one request says which dates have
   # anything on sale, and a date appearing there means a program was published —
   # before any showtime detail has been fetched.
   #
-  # Nothing was subscribed to it, so the whole first tier of the design was reporting
-  # into a log nobody reads. Deliberately unfiltered: a new date carries no film, hall
-  # or format, so `auditorium_regex` here would not narrow it, it would just be
-  # ignored (config load warns if you add one). The IMAX watch above is what filters;
-  # this is the heads-up that the next week exists at all.
+  # Deliberately unfiltered: a new date carries no film, hall or format, so
+  # `auditorium_regex` here would not narrow it, it would just be ignored (config load
+  # warns if you add one). The IMAX watches above are what filter; this is the heads-up
+  # that the next week exists at all.
   - name: "New dates published at Flora"
     source: cinemacity_cz
     trigger:
       on: [NEW_DATE]
     notify: [discord]
     cooldown: 6h
+
+  # --- O2 arena Praha -------------------------------------------------------
+  #
+  # A different shape of problem from the cinema. Nothing here sells out between one
+  # poll and the next; what matters is hearing that a tour is coming, and then hearing
+  # the moment it can actually be bought — the feed announces months before it sells.
+  #
+  # `kinds: [CONCERT]` is the music filter. The arena's programme mixes Hudba, Sport
+  # (mostly HC Sparta league fixtures, which recur all season) and family shows; without
+  # this every home game would be an alert. Drop the line to watch everything.
+  #
+  # Note what is *not* here: there is no sold-out or availability alerting for this
+  # source and there cannot be. The feed publishes no ratio and no seat counts, and its
+  # `isSoldout` flag was null on all 64 performances observed — the field exists and is
+  # never populated. Adding SOLD_OUT or AVAILABILITY_RISE below would look like coverage
+  # and deliver silence.
+  - name: "New show announced at O2 arena"
+    source: o2arena_cz
+    match:
+      kinds: [CONCERT]
+    trigger:
+      on: [NEW_SCREENING]
+    notify: [discord]
+    # A tour announcement is not time-critical and often lands as several dates at once;
+    # the digest threshold below turns a multi-night run into one message.
+    cooldown: 6h
+
+  - name: "Tickets on sale at O2 arena"
+    source: o2arena_cz
+    match:
+      kinds: [CONCERT]
+    trigger:
+      # Fires when a performance stops being "announced" and becomes buyable, which the
+      # adapter derives from the feed's own Selling_since. This is the one moment for a
+      # popular show where minutes matter — and the reason min_interval_seconds on the
+      # source is 30 minutes rather than several hours.
+      on: [ON_SALE]
+    notify: [discord]
+    cooldown: 1h

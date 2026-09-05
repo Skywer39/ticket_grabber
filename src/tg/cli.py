@@ -328,6 +328,7 @@ def watch_test(
                 venue_external_id=venue.external_id if venue else None,
                 starts_at=from_db(s.starts_at),
                 formats=list(s.formats or []),
+                kind=ev.kind if ev else None,
                 tz_name=tz,
             ):
                 continue
@@ -375,7 +376,7 @@ def notify_test(
         watch_name="test",
         screening_key="test:0",
         change_type=str(ChangeType.NEW_SCREENING),
-        title="Test alert — Odyssea",
+        title="Test alert — a film that is not really showing",
         body="Praha Flora / IMAX VOLVO\nTue 04 Aug 2026, 16:40\nFILM_70MM\n1.6% of seats free",
         url="https://www.cinemacity.cz/",
         channels=targets,

@@ -42,6 +42,12 @@ class ChangeType(StrEnum):
     AVAILABILITY_DROP = "AVAILABILITY_DROP"
     SOLD_OUT = "SOLD_OUT"
     BACK_ON_SALE = "BACK_ON_SALE"
+    #: Tickets that were announced but not yet purchasable have gone on sale.
+    #:
+    #: Distinct from BACK_ON_SALE, which is a sold-out house releasing stock. This is the
+    #: first moment a show can be bought at all, and for a venue that announces months
+    #: ahead it is the only moment that matters.
+    ON_SALE = "ON_SALE"
     PRICE_CHANGE = "PRICE_CHANGE"
     #: Tier 2 only: specific seats became free.
     SEAT_FREED = "SEAT_FREED"
@@ -262,6 +268,18 @@ def _compare(row: Screening, ns: NormScreening, source: str) -> list[Change]:
                 ChangeType.SOLD_OUT if ns.sold_out else ChangeType.BACK_ON_SALE,
                 {"sold_out": row.sold_out},
                 {"sold_out": ns.sold_out},
+            )
+        )
+
+    # Only the un-blocking is news. A show being pulled from sale is either temporary
+    # (and will un-block again, alerting then) or permanent (and SCREENING_REMOVED says
+    # so), and neither is worth waking someone at 3am for.
+    if row.sales_blocked and not ns.sales_blocked:
+        out.append(
+            change(
+                ChangeType.ON_SALE,
+                {"sales_blocked": row.sales_blocked},
+                {"sales_blocked": ns.sales_blocked},
             )
         )
 

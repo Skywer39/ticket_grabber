@@ -8,6 +8,12 @@ Tuesday, published it early, and by the time anyone looked, every good seat for 
 IMAX 70mm run was gone. That is a *detection latency* problem, not a checkout speed
 problem, and this fixes the detection.
 
+Two sources ship with it: **Cinema City** (the IMAX hall at Praha Flora — new
+screenings, and blocks of seats coming back on a sold-out house) and **O2 arena Praha**
+(new shows announced, and the moment their tickets go on sale). They are different
+shapes of problem, and the `Limits` section below is candid about what each source can
+and cannot tell you.
+
 ## What it actually does
 
 Live figures from Cinema City Praha Flora while this was being built:
@@ -122,21 +128,33 @@ profiles:
     avoid_rows: [1, 2, 3]
 
 watches:
-  - name: "Odyssea IMAX 70mm"
+  - name: "Seats freed up in the IMAX hall"
     source: cinemacity_cz
     match:
-      title_regex: "(?i)odyss"
-      formats: [FILM_70MM]
-      auditorium_regex: "(?i)imax"
-      time_between: ["16:00", "23:00"]
-    seats: { profile: flora_imax, min_contiguous: 2 }
+      auditorium_regex: "(?i)imax"     # the hall, not one film — see below
+      cinemas: ["1052"]
     trigger:
-      on: [NEW_SCREENING, AVAILABILITY_RISE]
+      on: [AVAILABILITY_RISE]
       min_seats_above_floor: 4         # in seats, measured from the resting level
       max_availability: 0.10           # only while the house is still sold out
     notify: [discord]
     cooldown: 10m
+
+  - name: "Tickets on sale at O2 arena"
+    source: o2arena_cz
+    match:
+      kinds: [CONCERT]                 # the arena also hosts hockey
+    trigger:
+      on: [ON_SALE]                    # announced months ago, buyable as of now
+    notify: [discord]
+    cooldown: 1h
 ```
+
+**Key on the hall, not the film.** The original watch here named one title, which is
+the one release you already know about. A watch keyed on the auditorium catches the
+next one the same way it would have caught this one — and picks up the concert films
+and anniversary screenings that run in IMAX without carrying the 70-mm attribute, which
+a `formats: [FILM_70MM]` filter drops silently.
 
 ## Counting in seats, not percentages
 
@@ -233,7 +251,7 @@ week exists at all.
 Check it before trusting it:
 
 ```bash
-tg watch test "Odyssea IMAX 70mm"   # which screenings match, and why
+tg watch test "Anything new in the IMAX hall"   # which screenings match, and why
 tg notify test discord              # confirm alerts actually reach you
 tg status                           # health, recent alerts, polling mode
 ```
@@ -337,6 +355,23 @@ answers *"Bohužel tento film v kině … nehrajeme"*. Two details that only tes
 reveals: the film route takes the **city group slug**, rewriting a cinema id to it,
 while the cinema route takes the **cinema id**; and the date must be the venue's wall
 date, not the UTC one, or late screenings link to the wrong day.
+
+**The O2 arena feed cannot tell you a show is selling out.** It publishes no
+availability ratio and no seat counts, and its `isSoldout` flag was `null` on all 64
+performances observed — the field exists in the schema and is never populated. So for
+that source there is no `SOLD_OUT` alerting and no `AVAILABILITY_RISE`; putting either
+in a watch would look like coverage and deliver silence. What it does carry is
+`Selling_since`, which drives `ON_SALE` — the moment an announced show becomes buyable,
+which for a venue announcing six months ahead is the moment that actually matters.
+
+That feed also has two properties worth knowing before you change its cadence. It is
+one ~837 KB document with no `ETag`, no `Last-Modified` and `Cache-Control: no-store`,
+so a conditional GET buys nothing and every poll pays in full — hence
+`min_interval_seconds` on the source, which holds it to twice an hour whatever the hot
+window says. And its `Performance_id` is a *time-slot* id rather than a performance
+identity: two separate guided-tour events reuse the same ids, so screenings are keyed
+on the `{event}-{performance}` pair instead. The first live poll found that one by
+dying on a UNIQUE constraint.
 
 **No bot-check solving, ever.** Not CAPTCHAs, not Turnstile, no evasion, no identity
 rotation, no retrying a refusal. When the site says no, this stops and tells you.

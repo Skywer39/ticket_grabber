@@ -17,6 +17,8 @@ import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from tg.core.normalize import EventKind
+
 log = logging.getLogger(__name__)
 
 WEEKDAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
@@ -182,6 +184,10 @@ class SeatPreference(BaseModel):
 class WatchMatch(BaseModel):
     title_regex: str | None = None
     formats: list[str] = Field(default_factory=list)
+    #: Kinds of thing to keep, e.g. ``[CONCERT]`` to watch a mixed-programme arena for
+    #: music and ignore its hockey. Empty means every kind, which is what a
+    #: single-purpose source like a cinema wants.
+    kinds: list[str] = Field(default_factory=list)
     auditorium_regex: str | None = None
     cinemas: list[str] = Field(default_factory=list)
     date_from: date | None = None
@@ -196,6 +202,15 @@ class WatchMatch(BaseModel):
         if bad:
             raise ValueError(f"unknown weekday(s): {bad}; expected any of {sorted(WEEKDAYS)}")
         return [d.lower() for d in v]
+
+    @field_validator("kinds")
+    @classmethod
+    def _check_kinds(cls, v: list[str]) -> list[str]:
+        known = {k.value for k in EventKind}
+        bad = [k for k in v if k.upper() not in known]
+        if bad:
+            raise ValueError(f"unknown kind(s): {bad}; expected any of {sorted(known)}")
+        return [k.upper() for k in v]
 
     @field_validator("title_regex", "auditorium_regex")
     @classmethod
